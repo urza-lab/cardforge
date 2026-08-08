@@ -1,0 +1,29 @@
+{
+  "app": { "name": "CardForge", "tagline": "Deck- & Cube-Finder" },
+  "nav": {
+    "dashboard": "Dashboard",
+    "collection": "Sammlung",
+    "collectionImport": "Sammlung importieren",
+    "lists": "Decks & Cubes",
+    "listsImport": "Listen importieren",
+    "comparisons": "Vergleiche",
+    "sources": "Quellen",
+    "prices": "Preise",
+    "settings": "Einstellungen",
+    "systemStatus": "Systemstatus"
+  },
+  "health": {
+    "title": "Systemstatus",
+    "live": "API-Prozess",
+    "ready": "Abhängigkeiten",
+    "postgres": "PostgreSQL",
+    "ok": "OK",
+    "degraded": "Eingeschränkt",
+    "unknown": "Wird geprüft…"
+  },
+  "common": {
+    "loading": "Lädt…",
+    "error": "Es ist ein Fehler aufgetreten",
+    "comingSoon": "Dieser Bereich wird in einer späteren Phase umgesetzt."
+  }
+}

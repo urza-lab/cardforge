@@ -1,0 +1,32 @@
+# Secrets & persistent data (bind-mounted, must never be committed).
+# Uses /data/* (not /data/) so the !/data/examples/ negation below can
+# actually re-include that one subdirectory — git cannot re-include content
+# under a directory that was itself excluded.
+/data/*
+!/data/examples/
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Docker / build artifacts
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp

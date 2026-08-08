@@ -1,0 +1,19 @@
+# Example Caddyfile for terminating TLS in front of CardForge.
+#
+# CardForge itself only serves plain HTTP on port 666 (see docker-compose.yml).
+# If you run a separate Caddy instance (e.g. in its own LXC container in your
+# homelab, as opposed to the commented-out `caddy` service in
+# docker-compose.yml), point it at this host on port 666:
+#
+#   cardforge.example.internal {
+#       reverse_proxy <cardforge-host-ip>:666
+#   }
+#
+# If you'd rather run Caddy as part of this compose stack instead, uncomment
+# the `caddy` service in docker-compose.yml, remove the frontend service's
+# direct host port mapping, and adapt the site block below (it then reaches
+# the frontend container by its service name instead of an external IP):
+
+cardforge.example.internal {
+    reverse_proxy frontend:80
+}

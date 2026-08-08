@@ -1,0 +1,49 @@
+name: Build & Publish Images
+
+# Builds and pushes backend/frontend images to GHCR on version tags.
+# Images are tagged with both the version and the git SHA (never just
+# `latest` alone) so a broken release never displaces the last known-good
+# tag — rolling back is `docker compose pull` a previous tag, not
+# re-pushing a deleted image. See BACKUP_RESTORE.md "Update process".
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/cardforge-${{ matrix.component }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=sha,format=short
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.component }}
+          target: runtime
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

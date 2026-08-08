@@ -1,0 +1,180 @@
+# CardForge — Deck & Cube Finder
+# Production-style Docker Compose stack. Exposes the app at http://<host>:666
+#
+# Core services (always started): secrets-init, postgres, redis, backend,
+# worker, frontend.
+# Optional observability services (grafana, prometheus): start with
+#   docker compose --profile observability up -d
+# Optional external TLS: see the commented-out `caddy` service at the bottom
+# and caddy/Caddyfile.example — most users should instead point their own
+# reverse proxy (e.g. a separate Caddy/Nginx instance) at host:666.
+
+x-backend-image: &backend-image
+  build:
+    context: ./backend
+    target: runtime
+
+x-backend-env: &backend-env
+  CARDFORGE_ENVIRONMENT: ${CARDFORGE_ENVIRONMENT:-production}
+  CARDFORGE_LOG_LEVEL: ${CARDFORGE_LOG_LEVEL:-INFO}
+  CARDFORGE_AUTH_MODE: ${CARDFORGE_AUTH_MODE:-single-user-no-login}
+  CARDFORGE_DEFAULT_LOCALE: ${CARDFORGE_DEFAULT_LOCALE:-en}
+  CARDFORGE_SCRYFALL_BULK_AUTO_DOWNLOAD: ${CARDFORGE_SCRYFALL_BULK_AUTO_DOWNLOAD:-true}
+  CARDFORGE_POSTGRES_HOST: postgres
+  CARDFORGE_POSTGRES_DB: ${POSTGRES_DB:-cardforge}
+  CARDFORGE_POSTGRES_USER: ${POSTGRES_USER:-cardforge}
+  CARDFORGE_REDIS_HOST: redis
+  CARDFORGE_SECRETS_DIR: /data/secrets
+
+services:
+  # One-shot job: resolves/generates persistent secrets under ./data/secrets
+  # before anything that needs them starts. See SECURITY.md.
+  secrets-init:
+    <<: *backend-image
+    container_name: cardforge-secrets-init
+    entrypoint: ["python", "scripts/init_secrets.py"]
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      DB_PASSWORD: ${DB_PASSWORD:-}
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-}
+      GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      CARDFORGE_SECRETS_DIR: /data/secrets
+    volumes:
+      - ${CARDFORGE_DATA_DIR:-./data}/secrets:/data/secrets
+    restart: "no"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: cardforge-postgres
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cardforge}
+      POSTGRES_USER: ${POSTGRES_USER:-cardforge}
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    volumes:
+      - ${CARDFORGE_DATA_DIR:-./data}/postgres:/var/lib/postgresql/data
+      - ${CARDFORGE_DATA_DIR:-./data}/secrets/db_password:/run/secrets/db_password:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cardforge} -d ${POSTGRES_DB:-cardforge}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: cardforge-redis
+    # Not published to the host; only reachable on the internal compose
+    # network. See SECURITY.md for the reasoning on why redis has no auth.
+    volumes:
+      - ${CARDFORGE_DATA_DIR:-./data}/redis:/data
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    <<: *backend-image
+    container_name: cardforge-backend
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *backend-env
+    volumes:
+      - ${CARDFORGE_DATA_DIR:-./data}/secrets:/data/secrets:ro
+      - ${CARDFORGE_DATA_DIR:-./data}/scryfall_cache:/data/scryfall_cache
+    restart: unless-stopped
+
+  # Background job processor (RQ, using Redis as the broker): Scryfall bulk
+  # sync, source refresh jobs (Phase 5), price refresh queue (Phase 6).
+  worker:
+    <<: *backend-image
+    container_name: cardforge-worker
+    entrypoint: []
+    command: ["python", "-m", "app.workers.run_worker"]
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *backend-env
+    volumes:
+      - ${CARDFORGE_DATA_DIR:-./data}/secrets:/data/secrets:ro
+      - ${CARDFORGE_DATA_DIR:-./data}/scryfall_cache:/data/scryfall_cache
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: cardforge-frontend
+    depends_on:
+      - backend
+    ports:
+      - "${CARDFORGE_HOST_PORT:-666}:80"
+    restart: unless-stopped
+
+  # --- Optional observability stack (Phase 7). Disabled by default. ---
+  # Start with: docker compose --profile observability up -d
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: cardforge-prometheus
+    profiles: ["observability"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${CARDFORGE_DATA_DIR:-./data}/prometheus:/prometheus
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:11.4.0
+    container_name: cardforge-grafana
+    profiles: ["observability"]
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - ${CARDFORGE_DATA_DIR:-./data}/grafana:/var/lib/grafana
+      - ${CARDFORGE_DATA_DIR:-./data}/secrets/grafana_admin_password:/run/secrets/grafana_admin_password:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_HOST_PORT:-3000}:3000"
+    restart: unless-stopped
+
+  # --- Optional: run Caddy as part of this stack instead of an external
+  # instance, to terminate TLS in front of the frontend container. Disabled
+  # by default so the app is reachable unencrypted at http://<host>:666 —
+  # uncomment and adjust caddy/Caddyfile if you want in-stack TLS instead of
+  # pointing an external reverse proxy (e.g. your homelab Caddy LXC) at :666.
+  #
+  # caddy:
+  #   image: caddy:2.9-alpine
+  #   container_name: cardforge-caddy
+  #   depends_on:
+  #     - frontend
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./caddy/Caddyfile.example:/etc/caddy/Caddyfile:ro
+  #     - ${CARDFORGE_DATA_DIR:-./data}/caddy/data:/data
+  #     - ${CARDFORGE_DATA_DIR:-./data}/caddy/config:/config
+  #   restart: unless-stopped

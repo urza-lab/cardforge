@@ -1,0 +1,42 @@
+# Development overrides — hot reload for both frontend and backend.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+# The frontend is served by Vite's dev server directly (frontend/Dockerfile.dev),
+# not the nginx production image, so it's mapped to its own port (5173) and
+# talks to the backend via Vite's dev proxy (see frontend/vite.config.ts) —
+# CardForge's usual same-origin port 666 is not used for the frontend in dev
+# mode (the backend container still listens on 8000 internally as usual).
+
+services:
+  backend:
+    environment:
+      CARDFORGE_ENVIRONMENT: development
+      CARDFORGE_LOG_LEVEL: DEBUG
+    entrypoint: ["python", "scripts/wait_for_postgres.py"]
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/migrations:/app/migrations
+      - ./backend/alembic.ini:/app/alembic.ini
+      - ${CARDFORGE_DATA_DIR:-./data}/secrets:/data/secrets:ro
+      - ${CARDFORGE_DATA_DIR:-./data}/scryfall_cache:/data/scryfall_cache
+
+  worker:
+    environment:
+      CARDFORGE_ENVIRONMENT: development
+      CARDFORGE_LOG_LEVEL: DEBUG
+    volumes:
+      - ./backend/app:/app/app
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      NODE_ENV: development

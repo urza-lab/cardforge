@@ -1,0 +1,13 @@
+# CardForge Prometheus scrape config (Phase 7).
+# Started only with: docker compose --profile observability up -d
+# The backend's /metrics endpoint is added in Phase 7 — until then this
+# target will show as "down" in Prometheus, which is expected and visible
+# rather than a silently fake "up".
+global:
+  scrape_interval: 30s
+
+scrape_configs:
+  - job_name: cardforge-backend
+    static_configs:
+      - targets: ["backend:8000"]
+    metrics_path: /metrics
