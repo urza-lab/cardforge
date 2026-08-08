@@ -16,7 +16,7 @@ Secret values are never logged or included in exception messages.
 from __future__ import annotations
 
 import os
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 SECRETS_DIR = Path(os.environ.get("CARDFORGE_SECRETS_DIR", "/data/secrets"))
@@ -44,11 +44,11 @@ def resolve_secret(file_name: str, env_names: list[str]) -> str:
     raise SecretNotAvailableError(file_name)
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_db_password() -> str:
     return resolve_secret("db_password", ["POSTGRES_PASSWORD", "DB_PASSWORD"])
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_app_secret_key() -> str:
     return resolve_secret("app_secret_key", ["APP_SECRET_KEY"])

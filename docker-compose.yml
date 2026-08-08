@@ -11,12 +11,11 @@
 
 x-backend-image: &backend-image
   build:
-    # Context is the repo root (not ./backend): migrations/ lives at the
-    # top level per the project layout, and backend/Dockerfile needs it
-    # alongside app/ inside the image — see the comment at the top of
-    # backend/Dockerfile.
-    context: .
-    dockerfile: backend/Dockerfile
+    # migrations/ lives at backend/migrations (not at the repo root) so that
+    # this build context, local dev, and CI (all of which operate with
+    # backend/ as their working directory) share one consistent layout — see
+    # ARCHITECTURE.md "Documented default decisions".
+    context: ./backend
     target: runtime
 
 x-backend-env: &backend-env
@@ -115,6 +114,13 @@ services:
     container_name: cardforge-worker
     entrypoint: []
     command: ["python", "-m", "app.workers.run_worker"]
+    # The image's HEALTHCHECK (inherited via the shared backend image) curls
+    # an HTTP endpoint that only the backend/secrets-init image actually
+    # serves — the worker has no HTTP server, so that check would always
+    # (correctly, but uselessly) report unhealthy. Disabled here rather than
+    # given a fake HTTP check.
+    healthcheck:
+      disable: true
     depends_on:
       secrets-init:
         condition: service_completed_successfully

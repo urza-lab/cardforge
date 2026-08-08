@@ -1,0 +1,14 @@
+# Build context for backend/Dockerfile is ./backend (see docker-compose.yml).
+# ../data (secrets, Postgres data, etc.) is naturally outside this context
+# already and never sent to the daemon at all — nothing to exclude for that.
+__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+*.log

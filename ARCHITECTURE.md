@@ -49,6 +49,16 @@ be decided without blocking implementation. All are changeable later.
   run on a home network for one collection owner; multi-user is there for
   households/playgroups that want it.
 - **License**: GPL-3.0-or-later (FOSS).
+- **`migrations/` lives at `backend/migrations/`**, not at the repo root as
+  the originally suggested tree in the spec showed it. Keeping it at the
+  root while `alembic.ini` lives in `backend/` caused Alembic's
+  `script_location` (which Alembic resolves relative to the current working
+  directory, not the ini file's location) to break in two different real
+  contexts — the Docker build and local/CI `cd backend && alembic ...`
+  usage — because each context needed a different relative path to reach
+  the same directory. Co-locating migrations with the backend that owns the
+  schema removes the ambiguity entirely and is also the conventional layout
+  for a FastAPI+Alembic project.
 - **Data persistence**: host bind mounts under `./data/...` (not named Docker
   volumes), so backups are plain `cp`/`tar` of a visible directory next to
   the compose file — see `BACKUP_RESTORE.md`.

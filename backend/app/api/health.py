@@ -14,7 +14,7 @@ from sqlalchemy import text
 
 from app.core.config import get_settings
 from app.core.database import get_engine
-from app.core.secrets import SecretNotAvailableError, get_db_password
+from app.core.secrets import SecretNotAvailableError
 
 router = APIRouter(prefix="/api/health", tags=["health"])
 
