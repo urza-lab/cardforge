@@ -16,7 +16,14 @@ Rules (see SECURITY.md):
 2. Otherwise, the first non-empty environment variable in the candidate list
    seeds the persistent file.
 3. Otherwise, a cryptographically secure random value is generated.
-4. Files are written with 0600 permissions, directory with 0700.
+4. Files are written with 0600 permissions, directory with 0700, owned by the
+   same uid/gid (1000:1000, "cardforge") that the backend/worker containers
+   run as — so this script runs as root (see the `secrets-init` service's
+   `user: "0:0"` override in docker-compose.yml, needed because Docker
+   auto-creates the ./data/secrets bind-mount host directory as root before
+   any container touches it) but immediately drops ownership of everything
+   it writes down to uid 1000, rather than leaving root-owned files that a
+   non-root backend container couldn't read.
 5. Secret values are never logged.
 6. This script never overwrites an existing secret file. Use
    scripts/reset-secrets.sh to deliberately rotate a secret.
@@ -30,6 +37,12 @@ from pathlib import Path
 
 SECRETS_DIR = Path(os.environ.get("CARDFORGE_SECRETS_DIR", "/data/secrets"))
 
+# Must match the uid/gid of the "cardforge" user created in backend/Dockerfile
+# (useradd --uid 1000 --gid cardforge ...), since that's the user the backend
+# and worker containers actually run as when reading these files.
+OWNER_UID = int(os.environ.get("CARDFORGE_SECRETS_UID", "1000"))
+OWNER_GID = int(os.environ.get("CARDFORGE_SECRETS_GID", "1000"))
+
 SECRET_SPECS: list[tuple[str, list[str]]] = [
     ("db_password", ["POSTGRES_PASSWORD", "DB_PASSWORD"]),
     ("app_secret_key", ["APP_SECRET_KEY"]),
@@ -37,10 +50,21 @@ SECRET_SPECS: list[tuple[str, list[str]]] = [
 ]
 
 
+def _chown_quiet(path: Path, uid: int, gid: int) -> None:
+    try:
+        os.chown(path, uid, gid)
+    except PermissionError:
+        # Not running as root (e.g. a manual local run outside Docker) — the
+        # file/dir keeps whatever owner created it, which is fine for that
+        # case since it's then already the invoking user.
+        print(f"[secrets-init] WARNING: could not chown {path} to {uid}:{gid} (non-fatal)")
+
+
 def resolve(filename: str, env_names: list[str]) -> None:
     path = SECRETS_DIR / filename
     if path.exists():
         path.chmod(0o600)
+        _chown_quiet(path, OWNER_UID, OWNER_GID)
         print(f"[secrets-init] {filename}: persistent secret already present, keeping it")
         return
 
@@ -61,14 +85,13 @@ def resolve(filename: str, env_names: list[str]) -> None:
 
     path.write_text(value)
     path.chmod(0o600)
+    _chown_quiet(path, OWNER_UID, OWNER_GID)
 
 
 def main() -> int:
     SECRETS_DIR.mkdir(parents=True, exist_ok=True)
-    try:
-        SECRETS_DIR.chmod(0o700)
-    except PermissionError:
-        print(f"[secrets-init] WARNING: could not chmod {SECRETS_DIR} (non-fatal)")
+    SECRETS_DIR.chmod(0o700)
+    _chown_quiet(SECRETS_DIR, OWNER_UID, OWNER_GID)
 
     for filename, env_names in SECRET_SPECS:
         resolve(filename, env_names)

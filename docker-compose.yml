@@ -37,6 +37,13 @@ services:
   secrets-init:
     <<: *backend-image
     container_name: cardforge-secrets-init
+    # Runs as root: Docker auto-creates the ./data/secrets bind-mount host
+    # directory as root on first start, before any container has touched it,
+    # and the image's default "cardforge" user (uid 1000) can't write into a
+    # root-owned directory. init_secrets.py immediately chowns everything it
+    # creates to uid 1000 (see backend/scripts/init_secrets.py) so the
+    # non-root backend/worker containers can still read the files afterwards.
+    user: "0:0"
     entrypoint: ["python", "scripts/init_secrets.py"]
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
