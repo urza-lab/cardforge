@@ -11,7 +11,12 @@
 
 x-backend-image: &backend-image
   build:
-    context: ./backend
+    # Context is the repo root (not ./backend): migrations/ lives at the
+    # top level per the project layout, and backend/Dockerfile needs it
+    # alongside app/ inside the image — see the comment at the top of
+    # backend/Dockerfile.
+    context: .
+    dockerfile: backend/Dockerfile
     target: runtime
 
 x-backend-env: &backend-env

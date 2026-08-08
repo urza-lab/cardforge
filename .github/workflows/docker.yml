@@ -20,7 +20,17 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        component: [backend, frontend]
+        include:
+          # backend's build context is the repo root (it needs the top-level
+          # migrations/ directory alongside backend/app) — see the comment at
+          # the top of backend/Dockerfile and the matching context/dockerfile
+          # split in docker-compose.yml.
+          - component: backend
+            context: .
+            dockerfile: backend/Dockerfile
+          - component: frontend
+            context: ./frontend
+            dockerfile: frontend/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +52,8 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          context: ./${{ matrix.component }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
           target: runtime
           push: true
           tags: ${{ steps.meta.outputs.tags }}

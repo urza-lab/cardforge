@@ -1,3 +1,9 @@
+# Build context for this Dockerfile is the REPO ROOT (see docker-compose.yml:
+# `context: .`, `dockerfile: backend/Dockerfile`), not ./backend — because
+# migrations/ lives at the repo root (per the project's top-level layout) but
+# needs to end up alongside app/ and alembic.ini inside the image. All COPY
+# source paths below are therefore relative to the repo root.
+
 FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -16,17 +22,17 @@ WORKDIR /app
 FROM base AS build-deps
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev \
     && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --user -r requirements.txt
 
 FROM base AS runtime
 COPY --from=build-deps /root/.local /home/cardforge/.local
 ENV PATH=/home/cardforge/.local/bin:$PATH
 
-COPY app ./app
+COPY backend/app ./app
 COPY migrations ./migrations
-COPY alembic.ini .
-COPY scripts ./scripts
+COPY backend/alembic.ini .
+COPY backend/scripts ./scripts
 
 RUN mkdir -p /data/secrets /data/scryfall_cache && chown -R cardforge:cardforge /app /data
 USER cardforge
