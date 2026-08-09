@@ -31,11 +31,14 @@ from now. See the project's design principles in `ARCHITECTURE.md`.
 ## Status
 
 This repository is being built in phases (see `ARCHITECTURE.md` for the
-phase plan). **Phase 1 is complete**: Docker Compose stack, persistent
-secrets, FastAPI health checks, and the React/TypeScript shell (with
-English/German UI) are up and testable. Later phases (collection import,
-Scryfall normalization, the comparison engine, pricing, refresh system,
-dashboards) land incrementally on top of this foundation.
+phase plan). **Phase 1 and Phase 2 are complete**: the Docker Compose stack,
+persistent secrets, FastAPI health checks, and the React/TypeScript shell
+(English/German UI) are up and testable, and collection import — ManaBox
+CSV, generic CSV, text lists, and JSON, each with a preview/confirm/abort
+flow and per-row error reporting — is implemented end to end (see
+`IMPORT_FORMATS.md`). Later phases (Scryfall normalization, the comparison
+engine, pricing, refresh system, dashboards) land incrementally on top of
+this foundation.
 
 ## Quick start
 

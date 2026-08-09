@@ -74,3 +74,66 @@ body {
   background: rgba(124, 92, 255, 0.2);
   color: #c6b8ff;
 }
+
+.cf-badge-ok { background: rgba(72, 199, 116, 0.2); color: #7ee2a0; }
+.cf-badge-error { background: rgba(255, 107, 107, 0.2); color: #ff9b9b; }
+.cf-badge-warn { background: rgba(255, 196, 92, 0.2); color: #ffd485; }
+
+.cf-table-wrap { overflow-x: auto; }
+
+.cf-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.cf-table th, .cf-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--cf-border);
+  white-space: nowrap;
+}
+.cf-table th { color: var(--cf-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
+.cf-table tr.cf-row-error td { background: rgba(255, 107, 107, 0.06); }
+
+.cf-form-row { margin-bottom: 14px; display: flex; flex-direction: column; gap: 6px; }
+.cf-form-row label { font-size: 13px; color: var(--cf-muted); }
+
+.cf-select, .cf-input, .cf-textarea {
+  background: var(--cf-bg);
+  color: var(--cf-text);
+  border: 1px solid var(--cf-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.cf-textarea { font-family: ui-monospace, monospace; resize: vertical; }
+
+.cf-btn {
+  background: var(--cf-panel);
+  color: var(--cf-text);
+  border: 1px solid var(--cf-border);
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.cf-btn:hover { border-color: var(--cf-accent); }
+.cf-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.cf-btn-primary { background: var(--cf-accent); border-color: var(--cf-accent); color: #fff; }
+.cf-btn-primary:hover { filter: brightness(1.1); }
+
+.cf-btn-row { display: flex; gap: 10px; margin-top: 16px; }
+
+.cf-alert {
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+.cf-alert-error { background: rgba(255, 107, 107, 0.12); border: 1px solid rgba(255, 107, 107, 0.4); }
+.cf-alert-warn { background: rgba(255, 196, 92, 0.12); border: 1px solid rgba(255, 196, 92, 0.4); }
+.cf-alert-success { background: rgba(72, 199, 116, 0.12); border: 1px solid rgba(72, 199, 116, 0.4); }
+
+.cf-stat-row { display: flex; gap: 24px; margin-bottom: 16px; flex-wrap: wrap; }
+.cf-stat { min-width: 90px; }
+.cf-stat .cf-stat-value { font-size: 22px; font-weight: 600; }
+.cf-stat .cf-stat-label { font-size: 12px; color: var(--cf-muted); }

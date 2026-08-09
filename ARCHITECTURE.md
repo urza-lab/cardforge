@@ -105,6 +105,47 @@ be decided without blocking implementation. All are changeable later.
   the git SHA — never only `latest` — specifically so a bad release doesn't
   strand you: rolling back is pulling a previous tag, not restoring a
   deleted image. Nothing here deletes older tags.
+- **Default user bootstrap** (Phase 2): the `users` row with `id = 1` is
+  seeded by the initial migration's data insert (see
+  `backend/migrations/versions/518d65b42f49_*.py`), not lazily created by
+  the app on first request. Single-user mode has no login flow to create a
+  user through, so every collection/import needs a stable owner to attach to
+  from the very first request, and a migration-time seed guarantees that
+  deterministically instead of depending on request ordering.
+- **Collections are multi-capable, but single-user UIs don't have to know
+  that** (Phase 2): the data model allows any number of named collections
+  per user (matching the multi-user-ready `users` table), but
+  `GET /api/collections/default` returns (creating on first call) the first
+  collection ever created for a user, marked `is_default`. The Collection /
+  Import UI pages use only that endpoint, so a single-collection user never
+  has to think about collection IDs; multi-collection support is there for
+  later phases/users who want it without a schema change.
+- **Import status/source-type enums are plain `VARCHAR`, not Postgres native
+  `ENUM` types** (Phase 2, see `app/models/imports.py`): a native enum needs
+  an `ALTER TYPE ... ADD VALUE` migration (which can't run inside a
+  transaction on older Postgres) every time a new source type or status is
+  added. A `String` column validated at the Pydantic/service layer keeps
+  adding one a pure application-code change.
+- **Import preview rows are persisted immediately, not held in server
+  memory** (Phase 2): `POST /api/imports/preview` parses the upload and
+  writes one `ImportRow` per row right away, before the user has confirmed
+  anything. This makes the preview step (and its per-row errors) a real,
+  re-fetchable resource (`GET /api/imports/{id}`) — the confirm step is just
+  "commit the rows already on this record," with no in-memory parse state to
+  keep alive between requests or re-send from the client.
+- **Duplicate-import detection is a flag, not a block** (Phase 2): re-
+  uploading a file whose content hash matches a previously *confirmed*
+  import in the same collection doesn't fail the preview — it's surfaced as
+  `is_likely_duplicate` / `duplicate_of_import_id` in the preview response.
+  The explicit confirm-or-abort choice IMPORT_FORMATS.md calls for is
+  already the normal preview flow, so no separate "force" flag was needed.
+- **Collection JSON import ships in Phase 2** alongside ManaBox CSV, generic
+  CSV, and text lists (matching the phase-plan table above), even though the
+  worked example in IMPORT_FORMATS.md's "JSON" section reads like a cube/deck
+  list — the same `{"cards": [...]}` shape works for a flat collection, and
+  building all four collection parsers together (`app/parsers/`) let them
+  share one row-mapping/validation helper (`app/parsers/common.py`) instead
+  of writing it three times now and a fourth time in Phase 5.
 
 ## Backend module boundaries
 

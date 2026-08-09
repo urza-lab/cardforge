@@ -1,0 +1,8 @@
+{
+  "name": "My Collection",
+  "cards": [
+    { "name": "Lightning Bolt", "set": "LEA", "collector_number": "161", "quantity": 4 },
+    { "name": "Sol Ring", "set": "C21", "collector_number": "263", "quantity": 1, "foil": true },
+    { "name": "Counterspell", "set": "LEA", "collector_number": "55", "quantity": 2, "condition": "NM" }
+  ]
+}

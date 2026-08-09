@@ -3,7 +3,9 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.collections import router as collections_router
 from app.api.health import router as health_router
+from app.api.imports import router as imports_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
@@ -29,6 +31,8 @@ if settings.environment == "development":
     )
 
 app.include_router(health_router)
+app.include_router(collections_router)
+app.include_router(imports_router)
 
 
 @app.get("/api")

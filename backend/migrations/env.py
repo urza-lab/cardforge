@@ -13,9 +13,7 @@ from app.core.config import get_settings  # noqa: E402
 from app.core.database import Base  # noqa: E402
 from app.core.secrets import get_db_password  # noqa: E402
 
-# Import model modules here as they are added (Phase 2+) so Base.metadata
-# is fully populated for autogenerate:
-# from app.models import collection, card, list as list_models, source, pricing  # noqa: F401,E402
+import app.models  # noqa: F401,E402  populates Base.metadata for autogenerate
 
 config = context.config
 

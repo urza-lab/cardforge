@@ -13,12 +13,18 @@ services:
     environment:
       CARDFORGE_ENVIRONMENT: development
       CARDFORGE_LOG_LEVEL: DEBUG
-    entrypoint: ["python", "scripts/wait_for_postgres.py"]
-    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"]
+    # entrypoint.sh (waits for Postgres, runs migrations) is unchanged from
+    # prod — only the final command differs, to add --reload.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     volumes:
       - ./backend/app:/app/app
       - ./backend/migrations:/app/migrations
       - ./backend/alembic.ini:/app/alembic.ini
+      # Not needed to run the app itself — mounted so `docker compose exec
+      # backend pytest` works as a convenience alternative to the
+      # without-Docker venv workflow in DEVELOPMENT.md (which CI also uses).
+      - ./backend/tests:/app/tests
+      - ./data/examples:/app/data/examples:ro
       - ${CARDFORGE_DATA_DIR:-./data}/secrets:/data/secrets:ro
       - ${CARDFORGE_DATA_DIR:-./data}/scryfall_cache:/data/scryfall_cache
 

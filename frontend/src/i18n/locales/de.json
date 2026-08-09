@@ -21,9 +21,57 @@
     "degraded": "Eingeschränkt",
     "unknown": "Wird geprüft…"
   },
+  "collection": {
+    "distinctEntries": "Verschiedene Einträge",
+    "totalCards": "Karten gesamt",
+    "empty": "Deine Sammlung ist leer.",
+    "columns": {
+      "name": "Name",
+      "set": "Set",
+      "number": "#",
+      "quantity": "Anz.",
+      "foil": "Foil",
+      "condition": "Zustand",
+      "language": "Sprache",
+      "price": "Preis"
+    }
+  },
+  "importPage": {
+    "sourceType": "Format",
+    "sourceTypes": {
+      "manabox_csv": "ManaBox CSV",
+      "generic_csv": "Generisches CSV",
+      "text_list": "Textliste",
+      "json": "JSON"
+    },
+    "file": "Datei",
+    "columnMapping": "Spaltenzuordnung überschreiben (optional, JSON)",
+    "preview": "Import prüfen",
+    "duplicateWarning": "Eine Datei mit exakt diesem Inhalt wurde bereits in diese Sammlung importiert. Beim Bestätigen wird sie erneut importiert.",
+    "totalRows": "Zeilen",
+    "validRows": "Gültig",
+    "errorRows": "Fehler",
+    "columns": {
+      "status": "Status",
+      "name": "Name",
+      "quantity": "Anz.",
+      "detail": "Details"
+    },
+    "status": { "ok": "OK", "error": "Fehler" },
+    "skipBadRows_one": "Die {{count}} fehlerhafte Zeile überspringen und den Rest importieren",
+    "skipBadRows_other": "Die {{count}} fehlerhaften Zeilen überspringen und den Rest importieren",
+    "confirm": "Import bestätigen",
+    "abort": "Abbrechen",
+    "confirmed_one": "{{count}} Karte wurde der Sammlung hinzugefügt.",
+    "confirmed_other": "{{count}} Karten wurden der Sammlung hinzugefügt.",
+    "aborted": "Import abgebrochen. Es wurde nichts zur Sammlung hinzugefügt.",
+    "importAnother": "Weitere Datei importieren"
+  },
   "common": {
     "loading": "Lädt…",
     "error": "Es ist ein Fehler aufgetreten",
-    "comingSoon": "Dieser Bereich wird in einer späteren Phase umgesetzt."
+    "comingSoon": "Dieser Bereich wird in einer späteren Phase umgesetzt.",
+    "yes": "Ja",
+    "no": "Nein"
   }
 }

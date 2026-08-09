@@ -21,7 +21,7 @@ COPY requirements.txt .
 RUN pip install --user -r requirements.txt
 
 FROM base AS runtime
-COPY --from=build-deps /root/.local /home/cardforge/.local
+COPY --from=build-deps --chown=cardforge:cardforge /root/.local /home/cardforge/.local
 ENV PATH=/home/cardforge/.local/bin:$PATH
 
 COPY app ./app
@@ -44,3 +44,4 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health/live', timeout=3).status==200 else 1)"
 
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,6 @@
+# Lines starting with # are comments and are skipped.
+4 Lightning Bolt
+1 Sol Ring (C21) 263
+2 Counterspell (LEA) 55
+1 Ragavan, Nimble Pilferer
+3x Brainstorm

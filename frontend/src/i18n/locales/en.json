@@ -21,9 +21,57 @@
     "degraded": "Degraded",
     "unknown": "Checking…"
   },
+  "collection": {
+    "distinctEntries": "Distinct entries",
+    "totalCards": "Total cards",
+    "empty": "Your collection is empty.",
+    "columns": {
+      "name": "Name",
+      "set": "Set",
+      "number": "#",
+      "quantity": "Qty",
+      "foil": "Foil",
+      "condition": "Condition",
+      "language": "Lang",
+      "price": "Price"
+    }
+  },
+  "importPage": {
+    "sourceType": "Format",
+    "sourceTypes": {
+      "manabox_csv": "ManaBox CSV",
+      "generic_csv": "Generic CSV",
+      "text_list": "Text list",
+      "json": "JSON"
+    },
+    "file": "File",
+    "columnMapping": "Column mapping override (optional, JSON)",
+    "preview": "Preview import",
+    "duplicateWarning": "A file with this exact content has already been imported into this collection. Confirming will import it again.",
+    "totalRows": "Rows",
+    "validRows": "Valid",
+    "errorRows": "Errors",
+    "columns": {
+      "status": "Status",
+      "name": "Name",
+      "quantity": "Qty",
+      "detail": "Detail"
+    },
+    "status": { "ok": "OK", "error": "Error" },
+    "skipBadRows_one": "Skip the {{count}} row with an error and import the rest",
+    "skipBadRows_other": "Skip the {{count}} rows with errors and import the rest",
+    "confirm": "Confirm import",
+    "abort": "Abort",
+    "confirmed_one": "Imported {{count}} card into the collection.",
+    "confirmed_other": "Imported {{count}} cards into the collection.",
+    "aborted": "Import aborted. Nothing was added to the collection.",
+    "importAnother": "Import another file"
+  },
   "common": {
     "loading": "Loading…",
     "error": "Something went wrong",
-    "comingSoon": "This section will be built out in a later phase."
+    "comingSoon": "This section will be built out in a later phase.",
+    "yes": "Yes",
+    "no": "No"
   }
 }
