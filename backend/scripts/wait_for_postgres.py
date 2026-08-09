@@ -10,7 +10,6 @@ import sys
 import time
 
 import psycopg
-
 from app.core.config import get_settings
 from app.core.secrets import SecretNotAvailableError, get_db_password
 
