@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS base
+﻿FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -28,6 +28,12 @@ COPY app ./app
 COPY migrations ./migrations
 COPY alembic.ini .
 COPY scripts ./scripts
+
+# Set explicitly at build time rather than relying on the executable bit
+# surviving git/tar/host-filesystem round-trips (Windows checkouts in
+# particular can lose it, since NTFS has no Unix executable bit) -- this
+# guarantees entrypoint.sh is runnable regardless of how it got here.
+RUN chmod +x scripts/entrypoint.sh scripts/init_secrets.py scripts/wait_for_postgres.py
 
 RUN mkdir -p /data/secrets /data/scryfall_cache && chown -R cardforge:cardforge /app /data
 USER cardforge
