@@ -4,7 +4,7 @@ Context for Claude Code picking up this project. See `README.md` for the
 product description and `ARCHITECTURE.md` for the full phase plan and
 documented design decisions — read both before making changes.
 
-## Status (updated after Phase 2)
+## Status (updated after Phase 3)
 
 Phase 1 (Docker Compose skeleton, persistent secrets, FastAPI healthcheck,
 React/TS shell) is **complete and verified working end-to-end** on a
@@ -12,23 +12,36 @@ Proxmox LXC (Debian, Docker + Compose v2).
 
 Phase 2 (DB models, Alembic migrations, collection import — ManaBox CSV,
 generic CSV, text lists, JSON, import preview/errors) is **complete and
-verified end-to-end**: `docker compose up -d --build` brings up all six
-services `Up`/`healthy` (including `frontend`, see gotcha #11 below);
-`/api/health/ready` reports postgres/redis OK; a full
-upload → preview → confirm round trip was exercised through the real nginx
-proxy (`POST /api/imports/preview` → `POST /api/imports/{id}/confirm` →
-`GET /api/collections/{id}/items`), not just against the backend directly.
-51 backend tests pass (`pytest`, 92% coverage on the new code); `ruff`,
-`mypy`, and the frontend `lint`/`typecheck`/`build` are all clean.
+verified end-to-end**, including a real upload → preview → confirm round
+trip through the nginx proxy, not just against the backend directly.
+
+Phase 3 (Scryfall normalization, oracle/printing comparison modes, user
+settings) is **complete and verified end-to-end against real data**: a real
+bulk sync against `api.scryfall.com` landed 110,571 printings in ~20s; the
+user's real 2,653-card ManaBox-imported collection resolved 100% exactly
+against it (`POST /api/collections/{id}/resolve`); real decklist comparisons
+were run against that real collection through the nginx proxy
+(`POST /api/comparisons/run`), both oracle and printing mode. 99 backend
+tests pass (`pytest`, 91% coverage); `ruff`, `mypy`, and the frontend
+`lint`/`typecheck`/`build` are all clean. `docker compose down && docker
+compose up -d --build` was verified to bring all six services back
+`Up`/`healthy` with the real collection and Scryfall mirror intact
+(bind-mounted Postgres data, not re-synced/re-imported).
 
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
+The LXC now has its own push access — SSH deploy key
+(`~/.ssh/cardforge_deploy`, write access, scoped to this one repo only),
+remote set to `git@github.com:urza-lab/cardforge.git`. No separate `gh` CLI
+install on the LXC.
 
-**Next up: Phase 3** (Scryfall normalization, oracle/printing comparison
-modes, user settings). See `ARCHITECTURE.md` for the full 7-phase plan and
-"Documented default decisions" for the Phase 2 choices made along the way
-(default-user bootstrap, `/collections/default`, enum-as-VARCHAR, import
-preview persistence, duplicate-import flagging, JSON collection import).
+**Next up: Phase 4** (deck/cube detail pages, interactive tables, exports,
+shopping list, budget filter). See `ARCHITECTURE.md` for the full 7-phase
+plan and "Documented default decisions" for the Phase 2/3 choices made along
+the way (default-user bootstrap, `/collections/default`, enum-as-VARCHAR,
+import preview persistence, duplicate-import flagging, JSON collection
+import, the single denormalized `scryfall_cards` table, resolution matching
+priority, ad-hoc non-persisted comparisons, minimal `user_settings` table).
 
 ## Environment
 
@@ -36,10 +49,11 @@ preview persistence, duplicate-import flagging, JSON collection import).
   3.12, Node.js LTS all installed via winget/npm during Phase 1 setup).
 - Runtime/test target: a Debian LXC container on Proxmox VE, Docker +
   Compose v2 installed, reachable at `docker.trusted.local:666`.
-- GitHub push access is only confirmed from the Windows machine (`gh auth
-  login` there). The LXC currently only has read access (public repo, plain
-  `git clone`/`git pull` — no push credentials configured there). If you
-  want the LXC to push directly, that needs its own auth setup first.
+- GitHub push access from the Windows machine: `gh auth login` there.
+  The LXC has its own, separate push access as of Phase 3: an SSH deploy key
+  (`~/.ssh/cardforge_deploy`, "Allow write access", scoped to only this repo)
+  with `origin` set to `git@github.com:urza-lab/cardforge.git`. No `gh` CLI
+  installed on the LXC — plain `git push`/`pull` only.
 
 ## Hard-won gotchas from Phase 1 (don't rediscover these)
 
@@ -102,6 +116,22 @@ preview persistence, duplicate-import flagging, JSON collection import).
     itself worked perfectly (`curl :666/api/...` always succeeded) — the
     `frontend` container just permanently showed `unhealthy` in
     `docker compose ps`.
+12. **`./data/scryfall_cache` has the same root-ownership problem as
+    `./data/secrets`** (found in Phase 3, fixed the same way as gotcha #4):
+    Docker creates the bind-mount host directory as root on first start, and
+    nothing chowned it to uid 1000 before the Scryfall bulk sync tried to
+    write there. Fixed by mounting it into `secrets-init` too and having
+    `init_secrets.py` chown it, same pattern as the secrets directory.
+13. **Tests must point `CARDFORGE_POSTGRES_DB` at a disposable database and
+    `CARDFORGE_REDIS_DB` at a non-zero index** (Phase 3) — enforced by a
+    hard `pytest_configure` guard in `backend/tests/conftest.py` that raises
+    before any test runs otherwise. `scryfall_cards` holds ~110k rows of
+    real reference data a test's cleanup deletes/repopulates, and
+    Scryfall-sync tests enqueue real RQ jobs onto whatever Redis DB is
+    configured — at index 0 (the default) that's the same one the real
+    `worker` container listens on, so an ill-configured test run could make
+    the real worker perform a real sync against the real database. See
+    DEVELOPMENT.md "Tests".
 
 ## Principles to keep enforcing in later phases
 
@@ -111,8 +141,8 @@ preview persistence, duplicate-import flagging, JSON collection import).
   reflect what actually happened, never a hardcoded "ok".
 - **External services stay optional.** The app must fully start and be
   usable (manual imports at minimum) with every source adapter disabled.
-- The comparison engine (`backend/app/comparison`, Phase 3+) must stay a
-  pure library with no FastAPI/SQLAlchemy-session/HTTP imports.
+- The comparison engine (`backend/app/comparison`, built in Phase 3) must
+  stay a pure library with no FastAPI/SQLAlchemy-session/HTTP imports.
 
 ## Testing a change
 
@@ -124,5 +154,7 @@ docker compose ps -a          # everything should be "Up"/"healthy", nothing stu
 curl -s http://localhost:666/api/health/ready | jq
 ```
 
-Backend: `cd backend && ruff check . && mypy app && pytest`
+Backend: `cd backend && ruff check . && mypy app && pytest` — but `pytest`
+needs `CARDFORGE_POSTGRES_DB=cardforge_test` and `CARDFORGE_REDIS_DB=1` set
+first (see gotcha #13 and DEVELOPMENT.md "Tests"), or it refuses to start.
 Frontend: `cd frontend && npm run lint && npm run build`

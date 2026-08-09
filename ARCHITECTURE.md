@@ -146,6 +146,81 @@ be decided without blocking implementation. All are changeable later.
   building all four collection parsers together (`app/parsers/`) let them
   share one row-mapping/validation helper (`app/parsers/common.py`) instead
   of writing it three times now and a fourth time in Phase 5.
+- **One denormalized `scryfall_cards` table, not separate oracle/printing
+  tables** (Phase 3): Scryfall's own "default_cards" bulk export is already
+  one JSON object per printing with oracle-level fields (name, oracle_text,
+  ...) repeated on every printing of that card — mirroring that shape
+  directly means oracle-mode comparison (`GROUP BY oracle_id`) and
+  printing-mode comparison (match the row's `id` exactly) both read from the
+  same table with no join, at the cost of some duplicated text data Postgres
+  doesn't mind.
+- **A Scryfall bulk sync fully replaces the table, in one transaction**
+  (Phase 3, see `app/source_adapters/scryfall.py`): the old rows are only
+  deleted once the new file has downloaded and parsed successfully, and
+  everything (delete + ~110k-row insert) commits atomically at the end. A
+  failure at any point rolls back to the previous successful sync's data
+  untouched — no partial mirror, no incremental upsert logic to get subtly
+  wrong. At ~20s for the full `default_cards` file, incremental sync wasn't
+  worth the complexity.
+- **Sync status uses a 4-value subset (`NOT_STARTED`/`FETCHING`/`CURRENT`/
+  `FAILED`) of SOURCE_ADAPTERS.md's full status vocabulary** (Phase 3) — the
+  others (`AUTH_REQUIRED`, `RATE_LIMITED`, `SOURCE_CHANGED`, ...) describe
+  failure modes a public-URL adapter (Phase 5) can hit, none of which apply
+  to downloading one public, unauthenticated bulk-data file.
+- **Scryfall auto-sync fires once, on first-ever start, and never
+  auto-retries a failure** (Phase 3, `scryfall_service.maybe_auto_trigger_sync`,
+  called from `app/main.py`'s lifespan): it only acts when status is
+  `NOT_STARTED`. A `FAILED` sync does not retry itself on the next container
+  restart — if something is persistently broken (no outbound network, DNS),
+  auto-retrying every restart would just hammer Scryfall for no reason. The
+  user re-triggers it manually from the System Status page instead.
+- **Collection items are resolved against Scryfall automatically at
+  import-confirm time** (Phase 3, `import_service.confirm_import` calls
+  `scryfall_resolution.resolve_item` per new row) so freshly-imported cards
+  are comparison-ready with no separate manual step — plus an explicit
+  `POST /api/collections/{id}/resolve` to re-resolve a whole collection
+  later (e.g. after the first-ever Scryfall sync finishes, for items
+  imported before any sync had run).
+- **Resolution is local-mirror-only, no REST fallback per unresolved card**
+  (Phase 3): matching hundreds or thousands of collection rows by hitting
+  `api.scryfall.com`'s single-card endpoint once per unresolved row would be
+  exactly the uncoordinated-request pattern the bulk mirror exists to avoid
+  (SOURCE_ADAPTERS.md "rate limits enforced centrally, not best effort"). A
+  REST single-card lookup belongs to a future single-card detail UI that
+  only ever looks up one card at a time — not built yet, so not added.
+- **Printing-mode comparison never lets an unresolved card match anything**
+  (Phase 3, `app/comparison/engine.py`): if a required or owned entry has no
+  resolved `scryfall_card_id`, it's treated as unmatched in printing mode
+  rather than falling back to a name-based guess — an unresolved row is not
+  proof of owning (or needing) any *particular* printing, and printing mode
+  exists specifically to answer that exact-printing question honestly (see
+  design principle 2, "no fake success"). Oracle mode falls back to
+  normalized-name matching instead, since "do you own a card with this
+  name" is still a meaningful question without a resolved oracle_id.
+- **Comparisons are ad-hoc and never persisted** (Phase 3,
+  `app/services/comparison_service.py`): unlike collection import, running a
+  comparison doesn't write anything to the database, so it skips the
+  preview/confirm/abort ceremony IMPORT_FORMATS.md describes for imports —
+  parse, resolve, compare, and respond in one request. The decklist side
+  reuses Phase 2's `text_list`/`json`/`generic_csv` parsers (not
+  `manabox_csv`, which is collection-export-shaped: condition/price/language
+  columns a decklist wouldn't have).
+- **User settings are a minimal 1:1 `user_settings` table**
+  (`default_comparison_mode`, `preferred_currency`) rather than a generic
+  key-value settings blob — two concrete, typed columns are simpler to
+  validate and migrate than a JSON bag for the two settings Phase 3 actually
+  needs. `preferred_currency` is stored (and shown in Settings) even though
+  nothing reads it yet — pricing/budget display is Phase 6 — so the setting
+  has one home from the start instead of being bolted on later.
+- **Tests require `CARDFORGE_POSTGRES_DB` to look like a test database and
+  `CARDFORGE_REDIS_DB` to be non-zero, enforced by a hard `pytest_configure`
+  guard** (Phase 3, `backend/tests/conftest.py`): Phase 3 introduced two ways
+  a test run could damage the real running app that Phase 2's tests couldn't
+  — `scryfall_cards` now holds ~110k rows of real reference data a test's
+  cleanup fixture deletes/repopulates, and Scryfall-sync tests enqueue real
+  RQ jobs onto whatever Redis DB is configured, which (at index 0) is the
+  same one the real `worker` container listens on. See DEVELOPMENT.md
+  "Tests".
 
 ## Backend module boundaries
 

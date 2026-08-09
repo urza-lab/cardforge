@@ -166,7 +166,37 @@ export default function CollectionImport() {
             </div>
           </div>
 
-          <div className="cf-table-wrap">
+          {preview.error_rows > 0 && (
+            <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "center" }}>
+              <input
+                id="skip-bad-rows"
+                type="checkbox"
+                checked={skipBadRows}
+                onChange={(e) => setSkipBadRows(e.target.checked)}
+              />
+              <label htmlFor="skip-bad-rows">
+                {t("importPage.skipBadRows", { count: preview.error_rows })}
+              </label>
+            </div>
+          )}
+
+          {/* Confirm/abort live here, above the (potentially very long) row
+              table below, so they don't require scrolling past thousands of
+              rows to reach. */}
+          <div className="cf-btn-row">
+            <button
+              className="cf-btn cf-btn-primary"
+              disabled={busy || (preview.error_rows > 0 && !skipBadRows)}
+              onClick={handleConfirm}
+            >
+              {t("importPage.confirm")}
+            </button>
+            <button className="cf-btn" disabled={busy} onClick={handleAbort}>
+              {t("importPage.abort")}
+            </button>
+          </div>
+
+          <div className="cf-table-wrap" style={{ marginTop: 20 }}>
             <table className="cf-table">
               <thead>
                 <tr>
@@ -195,33 +225,6 @@ export default function CollectionImport() {
                 ))}
               </tbody>
             </table>
-          </div>
-
-          {preview.error_rows > 0 && (
-            <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "center", marginTop: 14 }}>
-              <input
-                id="skip-bad-rows"
-                type="checkbox"
-                checked={skipBadRows}
-                onChange={(e) => setSkipBadRows(e.target.checked)}
-              />
-              <label htmlFor="skip-bad-rows">
-                {t("importPage.skipBadRows", { count: preview.error_rows })}
-              </label>
-            </div>
-          )}
-
-          <div className="cf-btn-row">
-            <button
-              className="cf-btn cf-btn-primary"
-              disabled={busy || (preview.error_rows > 0 && !skipBadRows)}
-              onClick={handleConfirm}
-            >
-              {t("importPage.confirm")}
-            </button>
-            <button className="cf-btn" disabled={busy} onClick={handleAbort}>
-              {t("importPage.abort")}
-            </button>
           </div>
         </div>
       )}

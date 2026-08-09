@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.schemas.collection import CollectionCreate, CollectionItemRead, CollectionRead
-from app.services import collection_service
+from app.schemas.collection import CollectionCreate, CollectionItemRead, CollectionRead, ResolutionSummaryRead
+from app.services import collection_service, scryfall_resolution
 
 router = APIRouter(prefix="/api/collections", tags=["collections"])
 
@@ -44,3 +44,22 @@ def list_collection_items(collection_id: int, db: Session = Depends(get_db)) -> 
     if collection is None:
         raise HTTPException(status_code=404, detail="collection not found")
     return [CollectionItemRead.model_validate(i) for i in collection_service.list_items(db, collection_id)]
+
+
+@router.post("/{collection_id}/resolve", response_model=ResolutionSummaryRead)
+def resolve_collection(collection_id: int, db: Session = Depends(get_db)) -> ResolutionSummaryRead:
+    """Re-match every item in this collection against the local Scryfall
+    mirror. Items are already resolved once at import time (Phase 2's
+    confirm_import calls this per-item); this is for re-running it in bulk
+    after a Scryfall sync fills in data that wasn't there yet.
+    """
+    collection = collection_service.get_collection(db, collection_id)
+    if collection is None:
+        raise HTTPException(status_code=404, detail="collection not found")
+    summary = scryfall_resolution.resolve_collection(db, collection_id)
+    return ResolutionSummaryRead(
+        total=summary.total,
+        resolved_exact=summary.resolved_exact,
+        resolved_oracle_only=summary.resolved_oracle_only,
+        unresolved=summary.unresolved,
+    )

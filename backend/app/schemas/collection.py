@@ -36,5 +36,15 @@ class CollectionItemRead(BaseModel):
     purchase_currency: str | None
     scryfall_id: str | None
     source_import_id: int | None
+    resolved_oracle_id: str | None
+    resolved_scryfall_card_id: str | None
+    resolved_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class ResolutionSummaryRead(BaseModel):
+    total: int
+    resolved_exact: int
+    resolved_oracle_only: int
+    unresolved: int

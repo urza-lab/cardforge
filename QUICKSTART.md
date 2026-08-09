@@ -54,8 +54,9 @@ First start does the following automatically:
 2. Postgres and Redis start.
 3. The backend waits for Postgres, runs Alembic migrations, and starts.
 4. If `CARDFORGE_SCRYFALL_BULK_AUTO_DOWNLOAD=true` (the default), the backend
-   downloads the Scryfall bulk card database in the background; progress is
-   visible on the **System Status** page in the UI (Phase 3).
+   downloads the Scryfall bulk card database in the background (~110k
+   printings, ~20s); progress is visible on the **System Status** page in
+   the UI, with a manual "Sync now" button there too.
 5. The frontend (nginx, serving the built React app and proxying `/api`) is
    published on `${CARDFORGE_HOST_PORT}` (default **666**).
 

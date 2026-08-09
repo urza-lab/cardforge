@@ -44,10 +44,27 @@ npm run dev
 
 ## Tests
 
+Point `CARDFORGE_POSTGRES_DB` at a disposable database and `CARDFORGE_REDIS_DB`
+at a non-zero index — not what your dev stack actually uses. The test suite
+deletes/replaces table contents (including the Scryfall bulk-data mirror)
+and can enqueue real RQ jobs; a `conftest.py` guard refuses to run at all
+unless both are pointed away from the real ones (database name must contain
+"test"; Redis DB index must not be 0, since 0 is what the real `worker`
+container listens on — an enqueue there could make it perform a real sync
+against the real database):
+
 ```bash
 cd backend
+export CARDFORGE_POSTGRES_DB=cardforge_test   # create it once: createdb / CREATE DATABASE
+export CARDFORGE_REDIS_DB=1
+alembic upgrade head                          # apply migrations to that database too
 pytest --cov=app --cov-report=term-missing
 ```
+
+CI does exactly this (see `.github/workflows/ci.yml`). If you're running via
+`docker compose exec backend ...`, pass both overrides per-command:
+`docker compose exec -e CARDFORGE_POSTGRES_DB=cardforge_test -e
+CARDFORGE_REDIS_DB=1 backend pytest`.
 
 ```bash
 cd frontend

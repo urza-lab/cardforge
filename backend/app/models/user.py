@@ -11,6 +11,7 @@ from app.core.database import Base
 if TYPE_CHECKING:
     from app.models.collection import Collection
     from app.models.imports import Import
+    from app.models.settings import UserSettings
 
 # id=1 always exists (see migrations/versions/0001_initial_schema.py) so that
 # single-user mode has a stable owner for collections/imports without a login
@@ -31,3 +32,6 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     imports: Mapped[list[Import]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    settings: Mapped[UserSettings] = relationship(
+        back_populates="user", cascade="all, delete-orphan", uselist=False
+    )

@@ -43,3 +43,12 @@ export async function apiPostForm<T>(path: string, form: FormData): Promise<T> {
   const resp = await fetch(`${API_BASE}${path}`, { method: "POST", body: form });
   return unwrap<T>(path, resp);
 }
+
+export async function apiPutJson<T>(path: string, body: unknown): Promise<T> {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return unwrap<T>(path, resp);
+}

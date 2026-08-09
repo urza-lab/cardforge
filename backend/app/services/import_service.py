@@ -20,6 +20,7 @@ from app.models.collection import Collection, CollectionItem
 from app.models.imports import Import, ImportRow, ImportRowStatus, ImportStatus
 from app.models.user import DEFAULT_USER_ID
 from app.parsers import PARSERS
+from app.services import scryfall_resolution
 
 
 class ImportNotFoundError(Exception):
@@ -138,26 +139,35 @@ def confirm_import(db: Session, import_record: Import, *, skip_bad_rows: bool) -
         raise ImportHasErrorRowsError(import_record.error_rows)
 
     rows_to_commit = [row for row in import_record.rows if row.status == ImportRowStatus.ok.value]
+    new_items: list[CollectionItem] = []
     for row in rows_to_commit:
         mapped = row.mapped_data
         assert mapped is not None  # ok rows always have mapped_data (see parsers/common.py)
-        db.add(
-            CollectionItem(
-                collection_id=import_record.collection_id,
-                card_name=mapped["name"],
-                set_code=mapped["set_code"],
-                set_name=mapped["set_name"],
-                collector_number=mapped["collector_number"],
-                quantity=mapped["quantity"],
-                foil=mapped["foil"],
-                language=mapped["language"],
-                condition=mapped["condition"],
-                purchase_price=Decimal(mapped["purchase_price"]) if mapped["purchase_price"] else None,
-                purchase_currency=mapped["purchase_currency"],
-                scryfall_id=mapped["scryfall_id"],
-                source_import_id=import_record.id,
-            )
+        item = CollectionItem(
+            collection_id=import_record.collection_id,
+            card_name=mapped["name"],
+            set_code=mapped["set_code"],
+            set_name=mapped["set_name"],
+            collector_number=mapped["collector_number"],
+            quantity=mapped["quantity"],
+            foil=mapped["foil"],
+            language=mapped["language"],
+            condition=mapped["condition"],
+            purchase_price=Decimal(mapped["purchase_price"]) if mapped["purchase_price"] else None,
+            purchase_currency=mapped["purchase_currency"],
+            scryfall_id=mapped["scryfall_id"],
+            source_import_id=import_record.id,
         )
+        db.add(item)
+        new_items.append(item)
+
+    # Resolve against the local Scryfall mirror immediately (Phase 3) so
+    # freshly-imported cards are comparison-ready without a separate manual
+    # step. If nothing has been synced yet (scryfall_cards empty), every item
+    # just resolves to "unresolved" here and picks up real matches the next
+    # time someone re-resolves the collection after a sync.
+    for item in new_items:
+        scryfall_resolution.resolve_item(db, item)
 
     import_record.imported_rows = len(rows_to_commit)
     import_record.status = (

@@ -4,6 +4,16 @@ CardForge's source-adapter system is designed so every external source is
 optional and swappable, and manual import always works as a fallback.
 **Status: interface defined in Phase 1; adapters land in Phases 3/5/6.**
 
+**Scryfall (Phase 3, done):** implemented as `app/source_adapters/scryfall.py`
+— bulk-data download/parse/mirror into `scryfall_cards`, triggered
+automatically on first start (or manually from the System Status page) and
+run as an RQ job. It's a one-file bulk sync, not shaped like the generic
+`SourceAdapter` protocol below (no `validate_url`/`fetch_by_url` — there's no
+per-list URL to fetch), so it doesn't implement that protocol; the REST
+single-card fallback mentioned in the table below is not yet built (deferred
+until a feature needs a single-card lookup, e.g. a Phase 4 card detail
+page).
+
 ## Adapter interface
 
 Every adapter (`backend/app/source_adapters/`) implements the same shape:

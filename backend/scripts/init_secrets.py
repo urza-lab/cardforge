@@ -36,6 +36,10 @@ import sys
 from pathlib import Path
 
 SECRETS_DIR = Path(os.environ.get("CARDFORGE_SECRETS_DIR", "/data/secrets"))
+# Not a secret, but the same Docker "bind-mount host dir gets created
+# root-owned" problem applies (see module docstring rule 4) — the backend's
+# Scryfall bulk sync (Phase 3) needs to write here as uid 1000.
+SCRYFALL_CACHE_DIR = Path(os.environ.get("CARDFORGE_SCRYFALL_CACHE_DIR", "/data/scryfall_cache"))
 
 # Must match the uid/gid of the "cardforge" user created in backend/Dockerfile
 # (useradd --uid 1000 --gid cardforge ...), since that's the user the backend
@@ -95,6 +99,11 @@ def main() -> int:
 
     for filename, env_names in SECRET_SPECS:
         resolve(filename, env_names)
+
+    SCRYFALL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    SCRYFALL_CACHE_DIR.chmod(0o755)
+    _chown_quiet(SCRYFALL_CACHE_DIR, OWNER_UID, OWNER_GID)
+    print("[secrets-init] scryfall_cache: ownership OK")
 
     print("[secrets-init] done")
     return 0

@@ -31,14 +31,17 @@ from now. See the project's design principles in `ARCHITECTURE.md`.
 ## Status
 
 This repository is being built in phases (see `ARCHITECTURE.md` for the
-phase plan). **Phase 1 and Phase 2 are complete**: the Docker Compose stack,
+phase plan). **Phases 1–3 are complete**: the Docker Compose stack,
 persistent secrets, FastAPI health checks, and the React/TypeScript shell
-(English/German UI) are up and testable, and collection import — ManaBox
-CSV, generic CSV, text lists, and JSON, each with a preview/confirm/abort
-flow and per-row error reporting — is implemented end to end (see
-`IMPORT_FORMATS.md`). Later phases (Scryfall normalization, the comparison
-engine, pricing, refresh system, dashboards) land incrementally on top of
-this foundation.
+(English/German UI) are up and testable; collection import — ManaBox CSV,
+generic CSV, text lists, and JSON, each with a preview/confirm/abort flow
+and per-row error reporting — is implemented end to end (see
+`IMPORT_FORMATS.md`); and a local Scryfall card-data mirror, automatic
+collection resolution against it, and both comparison modes (any printing /
+exact printing) are live on the Comparisons page — paste or upload a
+decklist and see what's buildable from your collection today. Later phases
+(deck/cube pages, pricing, refresh system, dashboards) land incrementally on
+top of this foundation.
 
 ## Quick start
 

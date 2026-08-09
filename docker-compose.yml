@@ -36,12 +36,13 @@ services:
   secrets-init:
     <<: *backend-image
     container_name: cardforge-secrets-init
-    # Runs as root: Docker auto-creates the ./data/secrets bind-mount host
-    # directory as root on first start, before any container has touched it,
-    # and the image's default "cardforge" user (uid 1000) can't write into a
-    # root-owned directory. init_secrets.py immediately chowns everything it
-    # creates to uid 1000 (see backend/scripts/init_secrets.py) so the
-    # non-root backend/worker containers can still read the files afterwards.
+    # Runs as root: Docker auto-creates bind-mount host directories (both
+    # ./data/secrets and ./data/scryfall_cache) as root on first start,
+    # before any container has touched them, and the image's default
+    # "cardforge" user (uid 1000) can't write into a root-owned directory.
+    # init_secrets.py immediately chowns everything it touches to uid 1000
+    # (see backend/scripts/init_secrets.py) so the non-root backend/worker
+    # containers can read/write them afterwards.
     user: "0:0"
     entrypoint: ["python", "scripts/init_secrets.py"]
     environment:
@@ -50,8 +51,10 @@ services:
       APP_SECRET_KEY: ${APP_SECRET_KEY:-}
       GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
       CARDFORGE_SECRETS_DIR: /data/secrets
+      CARDFORGE_SCRYFALL_CACHE_DIR: /data/scryfall_cache
     volumes:
       - ${CARDFORGE_DATA_DIR:-./data}/secrets:/data/secrets
+      - ${CARDFORGE_DATA_DIR:-./data}/scryfall_cache:/data/scryfall_cache
     restart: "no"
 
   postgres:

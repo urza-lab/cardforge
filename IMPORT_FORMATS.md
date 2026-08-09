@@ -32,7 +32,11 @@ manually in the import preview. Recognized fields:
 
 If a `Scryfall ID` column is present, it takes priority for identifying the
 exact printing; otherwise CardForge resolves `set code` + `collector number`
-+ `name` against the local Scryfall printing database (Phase 3).
++ `name` against the local Scryfall printing database. This resolution runs
+automatically right after a confirmed import (Phase 3, see
+`app/services/scryfall_resolution.py`) — the parser itself stays
+Scryfall-agnostic (see ARCHITECTURE.md's module boundaries: `parsers/` are
+pure functions with no DB access).
 
 ## Generic CSV
 

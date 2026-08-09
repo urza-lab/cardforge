@@ -1,0 +1,183 @@
+from __future__ import annotations
+
+import gzip
+import json
+from pathlib import Path
+from typing import Any
+
+import pytest
+from app.core.database import get_sessionmaker
+from app.models.scryfall import SYNC_STATE_ID, ScryfallCard, ScryfallSyncState, ScryfallSyncStatus
+from app.source_adapters import scryfall as scryfall_adapter
+
+# A tiny, realistic subset of default_cards JSONL objects: one plain card,
+# one double-faced card (fields split across card_faces), one excluded
+# layout (token) that must be dropped rather than stored.
+BOLT: dict[str, Any] = {
+    "id": "e3285e6b-3e79-4d7c-bf96-d920f973b122",
+    "oracle_id": "4457ed35-7c10-48c8-9776-456485fdf070",
+    "name": "Lightning Bolt",
+    "set": "lea",
+    "set_name": "Limited Edition Alpha",
+    "collector_number": "161",
+    "lang": "en",
+    "layout": "normal",
+    "mana_cost": "{R}",
+    "cmc": 1.0,
+    "type_line": "Instant",
+    "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+    "colors": ["R"],
+    "color_identity": ["R"],
+    "rarity": "common",
+    "foil": True,
+    "nonfoil": True,
+    "released_at": "1993-08-05",
+}
+
+DELVER: dict[str, Any] = {
+    "id": "11111111-1111-1111-1111-111111111111",
+    "oracle_id": "22222222-2222-2222-2222-222222222222",
+    "name": "Delver of Secrets // Insectile Aberration",
+    "set": "isd",
+    "set_name": "Innistrad",
+    "collector_number": "51",
+    "lang": "en",
+    "layout": "transform",
+    "cmc": 1.0,
+    "colors": None,
+    "color_identity": ["U"],
+    "rarity": "common",
+    "foil": True,
+    "nonfoil": True,
+    "released_at": "2011-09-30",
+    "card_faces": [
+        {
+            "name": "Delver of Secrets",
+            "mana_cost": "{U}",
+            "oracle_text": "At the beginning of your upkeep, look at the top card of your library...",
+            "colors": ["U"],
+        },
+        {
+            "name": "Insectile Aberration",
+            "mana_cost": "",
+            "oracle_text": "Flying",
+            "colors": ["U"],
+        },
+    ],
+}
+
+TOKEN: dict[str, Any] = {
+    "id": "33333333-3333-3333-3333-333333333333",
+    "oracle_id": "44444444-4444-4444-4444-444444444444",
+    "name": "Soldier",
+    "set": "tisd",
+    "set_name": "Innistrad Tokens",
+    "collector_number": "1",
+    "lang": "en",
+    "layout": "token",
+}
+
+
+def test_map_card_basic_fields():
+    mapped = scryfall_adapter._map_card(BOLT)
+    assert mapped is not None
+    assert mapped["id"] == BOLT["id"]
+    assert mapped["oracle_id"] == BOLT["oracle_id"]
+    assert mapped["set_code"] == "LEA"
+    assert mapped["mana_cost"] == "{R}"
+    assert mapped["colors"] == ["R"]
+
+
+def test_map_card_joins_double_faced_fields():
+    mapped = scryfall_adapter._map_card(DELVER)
+    assert mapped is not None
+    # The back face's mana_cost is "" (falsy) and correctly dropped from the
+    # join rather than producing a trailing "{U} // ".
+    assert mapped["mana_cost"] == "{U}"
+    assert "Flying" in mapped["oracle_text"]
+    assert "upkeep" in mapped["oracle_text"]
+    assert mapped["colors"] == ["U"]  # falls back to the first face
+
+
+def test_map_card_excludes_token_layout():
+    assert scryfall_adapter._map_card(TOKEN) is None
+
+
+def _write_gz_jsonl(path: Path, objects: list[dict[str, Any]]) -> None:
+    with gzip.open(path, "wt", encoding="utf-8") as f:
+        for obj in objects:
+            f.write(json.dumps(obj) + "\n")
+
+
+def test_iter_cards_from_file(tmp_path: Path):
+    path = tmp_path / "cards.jsonl.gz"
+    _write_gz_jsonl(path, [BOLT, DELVER])
+    cards = list(scryfall_adapter.iter_cards_from_file(path))
+    assert [c["name"] for c in cards] == [BOLT["name"], DELVER["name"]]
+
+
+def test_run_bulk_sync_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    fixture_path = tmp_path / "source.jsonl.gz"
+    _write_gz_jsonl(fixture_path, [BOLT, DELVER, TOKEN])
+
+    monkeypatch.setattr(
+        scryfall_adapter,
+        "fetch_bulk_manifest",
+        lambda settings: {"jsonl_download_uri": "https://example.invalid/x.jsonl.gz", "updated_at": "2026-01-01T00:00:00.000+00:00"},
+    )
+    monkeypatch.setattr(
+        scryfall_adapter,
+        "download_bulk_file",
+        lambda uri, dest, settings: dest.write_bytes(fixture_path.read_bytes()),
+    )
+
+    db = get_sessionmaker()()
+    try:
+        state = scryfall_adapter.run_bulk_sync(db)
+        assert state.status == ScryfallSyncStatus.current.value
+        assert state.card_count == 2  # TOKEN is excluded
+        assert state.error_message is None
+
+        names = {row.name for row in db.query(ScryfallCard).all()}
+        assert names == {BOLT["name"], DELVER["name"]}
+    finally:
+        db.close()
+
+
+def test_run_bulk_sync_failure_preserves_previous_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    db = get_sessionmaker()()
+    try:
+        db.add(
+            ScryfallCard(
+                id=BOLT["id"],
+                oracle_id=BOLT["oracle_id"],
+                name=BOLT["name"],
+                set_code="LEA",
+                set_name="Limited Edition Alpha",
+                collector_number="161",
+                lang="en",
+                layout="normal",
+            )
+        )
+        db.commit()
+
+        def _boom(settings: object) -> dict[str, Any]:
+            raise scryfall_adapter.ScryfallSyncError("manifest fetch failed")
+
+        monkeypatch.setattr(scryfall_adapter, "fetch_bulk_manifest", _boom)
+
+        try:
+            scryfall_adapter.run_bulk_sync(db)
+        except scryfall_adapter.ScryfallSyncError:
+            pass
+
+        state = db.get(ScryfallSyncState, SYNC_STATE_ID)
+        assert state is not None
+        assert state.status == ScryfallSyncStatus.failed.value
+        assert "manifest fetch failed" in (state.error_message or "")
+
+        # The previously-synced card must still be there - a failed sync
+        # never wipes out data from a prior successful one.
+        assert db.get(ScryfallCard, BOLT["id"]) is not None
+    finally:
+        db.close()

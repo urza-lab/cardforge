@@ -37,10 +37,13 @@ class Collection(Base):
 class CollectionItem(Base):
     """A single owned printing/quantity, as committed from a confirmed import.
 
-    Fields are stored exactly as parsed (Phase 2) — resolving against the
-    Scryfall printing database (matching by scryfall_id, or set_code +
-    collector_number + name) is Phase 3's job. `scryfall_id` is kept here
-    only as the *user-supplied* identifier when present in the source file.
+    Fields are stored exactly as parsed (Phase 2). `scryfall_id` is the
+    *user-supplied* identifier when present in the source file (e.g.
+    ManaBox's own "Scryfall ID" column) — it is not validated against
+    anything at import time. `resolved_oracle_id`/`resolved_scryfall_card_id`
+    (Phase 3) are populated separately by matching this row against the
+    local `scryfall_cards` mirror (see app/services/scryfall_resolution.py)
+    and are what the comparison engine actually reads.
     """
 
     __tablename__ = "collection_items"
@@ -65,6 +68,16 @@ class CollectionItem(Base):
     source_import_id: Mapped[int | None] = mapped_column(
         ForeignKey("imports.id", ondelete="SET NULL"), index=True
     )
+    # Phase 3 resolution against the local Scryfall mirror (scryfall_cards).
+    # oracle_id groups all printings of "the same card" (oracle-mode
+    # comparison); scryfall_card_id is the exact printing, when determinable
+    # (printing-mode comparison). Either can be null if resolution found no
+    # confident match — the comparison engine treats those as "unresolved".
+    resolved_oracle_id: Mapped[str | None] = mapped_column(String(36), index=True)
+    resolved_scryfall_card_id: Mapped[str | None] = mapped_column(
+        ForeignKey("scryfall_cards.id", ondelete="SET NULL"), index=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 

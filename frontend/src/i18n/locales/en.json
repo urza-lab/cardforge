@@ -19,7 +19,20 @@
     "postgres": "PostgreSQL",
     "ok": "OK",
     "degraded": "Degraded",
-    "unknown": "Checking…"
+    "unknown": "Checking…",
+    "scryfall": {
+      "title": "Scryfall card data",
+      "status": {
+        "NOT_STARTED": "Not synced yet",
+        "FETCHING": "Syncing…",
+        "CURRENT": "Up to date",
+        "FAILED": "Sync failed"
+      },
+      "cardCount": "Printings cached",
+      "dataFrom": "Scryfall data as of",
+      "syncNow": "Sync now",
+      "syncing": "Syncing…"
+    }
   },
   "collection": {
     "distinctEntries": "Distinct entries",
@@ -66,6 +79,42 @@
     "confirmed_other": "Imported {{count}} cards into the collection.",
     "aborted": "Import aborted. Nothing was added to the collection.",
     "importAnother": "Import another file"
+  },
+  "comparisonsPage": {
+    "sourceType": "Format",
+    "sourceTypes": {
+      "text_list": "Text list",
+      "json": "JSON",
+      "generic_csv": "Generic CSV"
+    },
+    "mode": "Comparison mode",
+    "modes": {
+      "oracle": "Any printing (oracle)",
+      "printing": "Exact printing"
+    },
+    "pasteList": "Paste your list",
+    "placeholder": "4 Lightning Bolt\n1 Sol Ring (C21) 263",
+    "orUploadFile": "…or upload a file instead",
+    "run": "Compare against collection",
+    "buildable": "Fully buildable from your collection.",
+    "notBuildable": "Not fully buildable — missing cards below.",
+    "requiredCards": "List entries",
+    "coverage": "Coverage",
+    "missingCards": "Missing entries",
+    "columns": {
+      "name": "Name",
+      "required": "Required",
+      "owned": "Owned",
+      "missing": "Missing",
+      "detail": "Detail"
+    },
+    "rowErrors": "Lines that couldn't be parsed"
+  },
+  "settingsPage": {
+    "saved": "Saved.",
+    "defaultComparisonMode": "Default comparison mode",
+    "preferredCurrency": "Preferred currency",
+    "currencyHint": "Used for price displays in later phases (not applied anywhere yet)."
   },
   "common": {
     "loading": "Loading…",

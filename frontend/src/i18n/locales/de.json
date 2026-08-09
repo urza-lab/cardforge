@@ -19,7 +19,20 @@
     "postgres": "PostgreSQL",
     "ok": "OK",
     "degraded": "Eingeschränkt",
-    "unknown": "Wird geprüft…"
+    "unknown": "Wird geprüft…",
+    "scryfall": {
+      "title": "Scryfall-Kartendaten",
+      "status": {
+        "NOT_STARTED": "Noch nicht synchronisiert",
+        "FETCHING": "Synchronisiert…",
+        "CURRENT": "Aktuell",
+        "FAILED": "Synchronisierung fehlgeschlagen"
+      },
+      "cardCount": "Zwischengespeicherte Drucke",
+      "dataFrom": "Scryfall-Daten vom",
+      "syncNow": "Jetzt synchronisieren",
+      "syncing": "Synchronisiert…"
+    }
   },
   "collection": {
     "distinctEntries": "Verschiedene Einträge",
@@ -66,6 +79,42 @@
     "confirmed_other": "{{count}} Karten wurden der Sammlung hinzugefügt.",
     "aborted": "Import abgebrochen. Es wurde nichts zur Sammlung hinzugefügt.",
     "importAnother": "Weitere Datei importieren"
+  },
+  "comparisonsPage": {
+    "sourceType": "Format",
+    "sourceTypes": {
+      "text_list": "Textliste",
+      "json": "JSON",
+      "generic_csv": "Generisches CSV"
+    },
+    "mode": "Vergleichsmodus",
+    "modes": {
+      "oracle": "Beliebiger Druck (Oracle)",
+      "printing": "Exakter Druck"
+    },
+    "pasteList": "Liste einfügen",
+    "placeholder": "4 Lightning Bolt\n1 Sol Ring (C21) 263",
+    "orUploadFile": "…oder stattdessen eine Datei hochladen",
+    "run": "Mit Sammlung abgleichen",
+    "buildable": "Vollständig aus deiner Sammlung baubar.",
+    "notBuildable": "Nicht vollständig baubar — fehlende Karten unten.",
+    "requiredCards": "Listeneinträge",
+    "coverage": "Abdeckung",
+    "missingCards": "Fehlende Einträge",
+    "columns": {
+      "name": "Name",
+      "required": "Benötigt",
+      "owned": "Vorhanden",
+      "missing": "Fehlend",
+      "detail": "Details"
+    },
+    "rowErrors": "Nicht lesbare Zeilen"
+  },
+  "settingsPage": {
+    "saved": "Gespeichert.",
+    "defaultComparisonMode": "Standard-Vergleichsmodus",
+    "preferredCurrency": "Bevorzugte Währung",
+    "currencyHint": "Wird in späteren Phasen für Preisanzeigen genutzt (aktuell noch nirgends aktiv)."
   },
   "common": {
     "loading": "Lädt…",

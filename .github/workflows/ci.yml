@@ -48,6 +48,9 @@ jobs:
       CARDFORGE_POSTGRES_DB: cardforge_test
       CARDFORGE_POSTGRES_USER: cardforge
       CARDFORGE_REDIS_HOST: localhost
+      # Must not be 0 - that's what the real worker container listens on in
+      # production; tests enqueue real RQ jobs (see backend/tests/conftest.py).
+      CARDFORGE_REDIS_DB: "1"
       DB_PASSWORD: test-password
       APP_SECRET_KEY: ci-test-secret-key
     steps:
