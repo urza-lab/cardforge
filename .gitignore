@@ -30,3 +30,5 @@ frontend/.vite/
 .vscode/
 .idea/
 *.swp
+
+*.tsbuildinfo
