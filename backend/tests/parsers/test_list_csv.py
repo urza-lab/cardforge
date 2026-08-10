@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.parsers.common import RowValidationError
 from app.parsers.list_csv import parse_list_csv
 

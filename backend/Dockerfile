@@ -27,6 +27,7 @@ ENV PATH=/home/cardforge/.local/bin:$PATH
 COPY app ./app
 COPY migrations ./migrations
 COPY alembic.ini .
+COPY pyproject.toml .
 COPY scripts ./scripts
 
 # Set explicitly at build time rather than relying on the executable bit

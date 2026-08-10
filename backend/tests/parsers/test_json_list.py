@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
-
 from app.parsers.common import RowValidationError
 from app.parsers.json_list import parse_json_list
+
 from tests.fixtures import EXAMPLES_DIR
 
 FIXTURE = EXAMPLES_DIR / "collection.json"

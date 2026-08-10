@@ -17,7 +17,14 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.comparison import ComparisonMode, ComparisonResult, ComparisonSettings, OwnedCard, RequiredCard, compare
+from app.comparison import (
+    ComparisonMode,
+    ComparisonResult,
+    ComparisonSettings,
+    OwnedCard,
+    RequiredCard,
+    compare,
+)
 from app.models.collection import CollectionItem
 from app.models.lists import CardListItem
 from app.parsers import PARSERS

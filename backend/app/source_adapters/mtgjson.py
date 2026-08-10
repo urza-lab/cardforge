@@ -68,7 +68,7 @@ def fetch_identifiers_map(settings: Settings) -> dict[str, str]:
 def fetch_prices_today(settings: Settings) -> dict[str, Any]:
     resp = httpx.get(PRICES_URL, headers=_headers(settings), timeout=DOWNLOAD_TIMEOUT_SECONDS)
     resp.raise_for_status()
-    return resp.json()["data"]  # type: ignore[no-any-return]
+    return resp.json()["data"]
 
 
 def _latest(date_map: dict[str, Any] | None) -> Any | None:

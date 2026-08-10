@@ -20,6 +20,7 @@ services:
       - ./backend/app:/app/app
       - ./backend/migrations:/app/migrations
       - ./backend/alembic.ini:/app/alembic.ini
+      - ./backend/pyproject.toml:/app/pyproject.toml
       # Not needed to run the app itself — mounted so `docker compose exec
       # backend pytest` works as a convenience alternative to the
       # without-Docker venv workflow in DEVELOPMENT.md (which CI also uses).

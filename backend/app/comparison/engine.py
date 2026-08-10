@@ -48,11 +48,7 @@ def compare(
     for required_card in required:
         total_required_quantity += required_card.quantity
 
-        key: str | None
-        if settings.mode == "printing":
-            key = required_card.scryfall_card_id
-        else:
-            key = _oracle_key(required_card)
+        key: str | None = required_card.scryfall_card_id if settings.mode == "printing" else _oracle_key(required_card)
 
         available = owned_pool.get(key, 0) if key is not None else 0
         applied = min(available, required_card.quantity)

@@ -13,6 +13,14 @@ src = ["app", "tests"]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
 
+# FastAPI's own dependency-injection pattern (`db: Session = Depends(get_db)`)
+# is a function call in an argument default, which B008 normally flags as a
+# mutable-default footgun - it isn't one here (FastAPI calls it fresh per
+# request, never reuses a cached default). This is B008's own documented
+# exception mechanism, not a suppression of a real issue.
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body", "fastapi.File", "fastapi.Form"]
+
 [tool.mypy]
 python_version = "3.12"
 ignore_missing_imports = true

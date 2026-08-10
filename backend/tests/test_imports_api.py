@@ -4,6 +4,7 @@ import json
 
 from app.main import app
 from fastapi.testclient import TestClient
+
 from tests.fixtures import EXAMPLES_DIR
 
 client = TestClient(app)

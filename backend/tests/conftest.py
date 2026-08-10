@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import text
-
 from app.core.config import get_settings
 from app.core.database import get_sessionmaker
 from app.core.queue import get_redis
+from sqlalchemy import text
 
 
 def pytest_configure(config: pytest.Config) -> None:

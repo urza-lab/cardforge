@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import gzip
 import json
 from decimal import Decimal
@@ -337,10 +338,8 @@ def test_run_bulk_sync_failure_preserves_previous_data(tmp_path: Path, monkeypat
 
         monkeypatch.setattr(scryfall_adapter, "fetch_bulk_manifest", _boom)
 
-        try:
+        with contextlib.suppress(scryfall_adapter.ScryfallSyncError):
             scryfall_adapter.run_bulk_sync(db)
-        except scryfall_adapter.ScryfallSyncError:
-            pass
 
         state = db.get(ScryfallSyncState, SYNC_STATE_ID)
         assert state is not None

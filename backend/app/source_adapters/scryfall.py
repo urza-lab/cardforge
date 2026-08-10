@@ -61,7 +61,7 @@ def fetch_bulk_manifest(settings: Settings) -> dict[str, Any]:
     resp.raise_for_status()
     for entry in resp.json()["data"]:
         if entry["type"] == BULK_DATA_TYPE:
-            return entry  # type: ignore[no-any-return]
+            return entry
     raise ScryfallSyncError(f"bulk-data manifest has no '{BULK_DATA_TYPE}' entry")
 
 

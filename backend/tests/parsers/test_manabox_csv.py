@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
-
 from app.parsers.common import RowValidationError
 from app.parsers.manabox_csv import parse_manabox_csv
+
 from tests.fixtures import EXAMPLES_DIR
 
 FIXTURE = EXAMPLES_DIR / "manabox_collection.csv"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.parsers.text_list import parse_text_list
+
 from tests.fixtures import EXAMPLES_DIR
 
 FIXTURE = EXAMPLES_DIR / "collection_list.txt"

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import pytest
-
 from app.parsers.common import RowValidationError
 from app.parsers.generic_csv import parse_generic_csv
+
 from tests.fixtures import EXAMPLES_DIR
 
 FIXTURE = EXAMPLES_DIR / "generic_collection.csv"

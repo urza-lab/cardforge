@@ -5,7 +5,13 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.schemas.collection import CollectionCreate, CollectionItemRead, CollectionRead, ResolutionSummaryRead
-from app.services import collection_service, display_name_service, export_service, scryfall_resolution, settings_service
+from app.services import (
+    collection_service,
+    display_name_service,
+    export_service,
+    scryfall_resolution,
+    settings_service,
+)
 
 router = APIRouter(prefix="/api/collections", tags=["collections"])
 

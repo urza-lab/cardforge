@@ -11,7 +11,13 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.comparison.types import MissingCard
-from app.models.pricing import DEFAULT_PRICE_PROFILE_NAME, DEFAULT_PROVIDER_PRIORITY, PriceObservation, PriceProfile, PriceProvider
+from app.models.pricing import (
+    DEFAULT_PRICE_PROFILE_NAME,
+    DEFAULT_PROVIDER_PRIORITY,
+    PriceObservation,
+    PriceProfile,
+    PriceProvider,
+)
 from app.models.scryfall import ScryfallCard
 from app.models.user import DEFAULT_USER_ID
 from app.pricing.budget import BudgetResult, PricedMissingCard, apply_budget
