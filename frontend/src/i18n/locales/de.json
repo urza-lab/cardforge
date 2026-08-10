@@ -125,7 +125,17 @@
     "chooseList": "Liste wählen…",
     "newList": "+ Neue Liste…",
     "needsList": "Wähle zuerst eine Liste oder benenne eine neue.",
-    "sourceTypes": { "text": "Textliste", "json": "JSON" },
+    "modeFile": "Datei / einfügen",
+    "modeUrl": "Von einer URL",
+    "urlLabel": "Deck-URL",
+    "urlHint": "Öffentliche Moxfield- oder Archidekt-Deck-URLs — kein Login nötig. Die Liste bleibt mit dieser URL verknüpft und kann später aktualisiert werden.",
+    "sourceTypes": {
+      "text": "Textliste",
+      "json": "JSON",
+      "csv": "CSV",
+      "moxfield": "Moxfield",
+      "archidekt": "Archidekt"
+    },
     "placeholder": "4 Lightning Bolt\n1 Sol Ring (C21) 263\nCommander: Atraxa, Praetors' Voice",
     "viewList": "Liste ansehen",
     "columns": { "section": "Bereich" },
@@ -142,7 +152,24 @@
     "empty": "Diese Liste hat noch keine Karten.",
     "category": "Kategorie",
     "exportCsv": "CSV exportieren",
-    "delete": "Liste löschen"
+    "delete": "Liste löschen",
+    "importedFrom": "Importiert von",
+    "lastRefreshed": "Zuletzt aktualisiert",
+    "refreshNow": "Jetzt aktualisieren",
+    "refreshing": "Aktualisiert…",
+    "authRequiredHint": "Dieses Deck erfordert jetzt einen Login zum Anzeigen — CardForge liest nur öffentliche URLs. Aktualisiere manuell, sobald es wieder öffentlich ist, oder importiere es anders neu.",
+    "refreshStatus": {
+      "FETCHING": "Aktualisiert…",
+      "CURRENT": "Aktuell",
+      "STALE": "Veraltet",
+      "FAILED": "Aktualisierung fehlgeschlagen",
+      "AUTH_REQUIRED": "Login erforderlich"
+    }
+  },
+  "sourcesPage": {
+    "intro": "Decks und Cubes, die von einer öffentlichen Moxfield- oder Archidekt-URL importiert wurden. Jede bleibt mit ihrer Quelle verknüpft und kann aktualisiert werden, um dortige Änderungen zu übernehmen.",
+    "empty": "Noch keine Liste von einer URL importiert — siehe Listen importieren.",
+    "columns": { "provider": "Quelle", "status": "Status" }
   },
   "settingsPage": {
     "saved": "Gespeichert.",

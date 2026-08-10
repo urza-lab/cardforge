@@ -21,6 +21,7 @@ from app.parsers.common import (
     parse_quantity,
     parse_scryfall_id,
     parse_section,
+    parse_tags,
 )
 
 
@@ -55,18 +56,6 @@ def _as_str(value: Any) -> str | None:
     return text or None
 
 
-def _as_tags(value: Any) -> list[str] | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        tags = [t.strip() for t in value.split(",") if t.strip()]
-    elif isinstance(value, list):
-        tags = [str(t).strip() for t in value if str(t).strip()]
-    else:
-        raise RowValidationError(f"tags must be a list of strings or a comma-separated string, got {value!r}")
-    return tags or None
-
-
 def _parse_entry(row_number: int, entry: Any) -> ParsedRow:
     if not isinstance(entry, dict):
         return ParsedRow(row_number=row_number, raw={"value": entry}, error="card entry must be a JSON object")
@@ -96,7 +85,7 @@ def _parse_entry(row_number: int, entry: Any) -> ParsedRow:
             "scryfall_id": parse_scryfall_id(_as_str(entry.get("scryfall_id"))),
             "section": parse_section(_as_str(entry.get("section"))),
             "category": _as_str(entry.get("category")),
-            "tags": _as_tags(entry.get("tags")),
+            "tags": parse_tags(entry.get("tags")),
         }
     except RowValidationError as exc:
         return ParsedRow(row_number=row_number, raw=raw, error=str(exc))

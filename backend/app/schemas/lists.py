@@ -20,6 +20,13 @@ class CardListRead(BaseModel):
     name: str
     list_type: str
     source_url: str | None
+    source_type: str | None
+    refresh_status: str | None
+    refresh_error: str | None
+    last_refreshed_at: datetime | None
+    # Not an ORM column - computed by app.services.list_refresh_service.is_stale
+    # and filled in by the API layer (see app/api/lists.py).
+    is_stale: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -67,6 +74,7 @@ class ListImportRead(BaseModel):
     list_id: int
     source_type: str
     original_filename: str | None
+    source_url: str | None
     status: str
     total_rows: int
     valid_rows: int
@@ -84,6 +92,11 @@ class ListImportPreviewResponse(ListImportRead):
 
 class ListImportConfirmRequest(BaseModel):
     skip_bad_rows: bool = False
+
+
+class ListImportUrlRequest(BaseModel):
+    list_id: int
+    url: str = Field(min_length=1, max_length=512)
 
 
 class ListComparisonResponse(BaseModel):

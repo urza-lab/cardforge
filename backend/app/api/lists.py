@@ -6,11 +6,13 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.schemas.comparison import MissingCardRead
 from app.schemas.lists import CardListCreate, CardListItemRead, CardListRead, ListComparisonResponse
+from app.models.lists import CardList
 from app.services import (
     collection_service,
     comparison_service,
     display_name_service,
     export_service,
+    list_refresh_service,
     list_service,
     settings_service,
 )
@@ -18,9 +20,15 @@ from app.services import (
 router = APIRouter(prefix="/api/lists", tags=["lists"])
 
 
+def _to_read(card_list: CardList) -> CardListRead:
+    return CardListRead.model_validate(card_list).model_copy(
+        update={"is_stale": list_refresh_service.is_stale(card_list)}
+    )
+
+
 @router.get("", response_model=list[CardListRead])
 def list_all(db: Session = Depends(get_db)) -> list[CardListRead]:
-    return [CardListRead.model_validate(item) for item in list_service.list_lists(db)]
+    return [_to_read(item) for item in list_service.list_lists(db)]
 
 
 @router.post("", response_model=CardListRead, status_code=201)
@@ -29,7 +37,7 @@ def create_list(payload: CardListCreate, db: Session = Depends(get_db)) -> CardL
         card_list = list_service.create_list(db, name=payload.name, list_type=payload.list_type)
     except list_service.InvalidListTypeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return CardListRead.model_validate(card_list)
+    return _to_read(card_list)
 
 
 @router.get("/{list_id}", response_model=CardListRead)
@@ -37,7 +45,23 @@ def get_list(list_id: int, db: Session = Depends(get_db)) -> CardListRead:
     card_list = list_service.get_list(db, list_id)
     if card_list is None:
         raise HTTPException(status_code=404, detail="list not found")
-    return CardListRead.model_validate(card_list)
+    return _to_read(card_list)
+
+
+@router.post("/{list_id}/refresh", response_model=CardListRead, status_code=202)
+def refresh_list(list_id: int, db: Session = Depends(get_db)) -> CardListRead:
+    card_list = list_service.get_list(db, list_id)
+    if card_list is None:
+        raise HTTPException(status_code=404, detail="list not found")
+    try:
+        card_list = list_refresh_service.trigger_refresh(db, card_list)
+    except list_refresh_service.NotUrlSourcedError as exc:
+        raise HTTPException(
+            status_code=400, detail="list has no source URL to refresh from (it wasn't imported from one)"
+        ) from exc
+    except list_refresh_service.RefreshAlreadyInProgressError as exc:
+        raise HTTPException(status_code=409, detail="a refresh for this list is already in progress") from exc
+    return _to_read(card_list)
 
 
 @router.delete("/{list_id}", status_code=204, response_model=None)

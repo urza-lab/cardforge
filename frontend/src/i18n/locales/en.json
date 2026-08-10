@@ -125,7 +125,17 @@
     "chooseList": "Choose a list…",
     "newList": "+ New list…",
     "needsList": "Pick a list or name a new one first.",
-    "sourceTypes": { "text": "Text list", "json": "JSON" },
+    "modeFile": "File / paste",
+    "modeUrl": "From a URL",
+    "urlLabel": "Deck URL",
+    "urlHint": "Public Moxfield or Archidekt deck URLs — no login required. The list stays linked to this URL and can be refreshed later.",
+    "sourceTypes": {
+      "text": "Text list",
+      "json": "JSON",
+      "csv": "CSV",
+      "moxfield": "Moxfield",
+      "archidekt": "Archidekt"
+    },
     "placeholder": "4 Lightning Bolt\n1 Sol Ring (C21) 263\nCommander: Atraxa, Praetors' Voice",
     "viewList": "View list",
     "columns": { "section": "Section" },
@@ -142,7 +152,24 @@
     "empty": "This list has no cards yet.",
     "category": "Category",
     "exportCsv": "Export CSV",
-    "delete": "Delete list"
+    "delete": "Delete list",
+    "importedFrom": "Imported from",
+    "lastRefreshed": "Last refreshed",
+    "refreshNow": "Refresh now",
+    "refreshing": "Refreshing…",
+    "authRequiredHint": "This deck now requires login to view — CardForge only reads public URLs. Refresh manually once it's public again, or re-import it another way.",
+    "refreshStatus": {
+      "FETCHING": "Refreshing…",
+      "CURRENT": "Up to date",
+      "STALE": "Stale",
+      "FAILED": "Refresh failed",
+      "AUTH_REQUIRED": "Login required"
+    }
+  },
+  "sourcesPage": {
+    "intro": "Decks and cubes imported from a public Moxfield or Archidekt URL. Each stays linked to its source and can be refreshed to pick up changes made there.",
+    "empty": "No lists have been imported from a URL yet — see Import Lists.",
+    "columns": { "provider": "Source", "status": "Status" }
   },
   "settingsPage": {
     "saved": "Saved.",

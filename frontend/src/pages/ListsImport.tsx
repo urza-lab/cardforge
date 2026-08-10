@@ -4,8 +4,16 @@ import { Link } from "react-router-dom";
 import { apiGet, apiPostForm, apiPostJson, ApiError } from "../api/client";
 import type { CardList, ListImportPreview, ListImportSourceType, ListImportSummary, ListType } from "../types/lists";
 
-const SOURCE_TYPES: ListImportSourceType[] = ["text", "json"];
+const SOURCE_TYPES: ListImportSourceType[] = ["text", "json", "csv"];
+const FILE_ACCEPT: Record<ListImportSourceType, string> = {
+  text: ".txt",
+  json: ".json",
+  csv: ".csv",
+  moxfield: "",
+  archidekt: "",
+};
 const NEW_LIST_VALUE = "__new__";
+type ImportMode = "file" | "url";
 
 export default function ListsImport() {
   const { t } = useTranslation();
@@ -14,9 +22,11 @@ export default function ListsImport() {
   const [newListName, setNewListName] = useState("");
   const [newListType, setNewListType] = useState<ListType>("deck");
 
+  const [mode, setMode] = useState<ImportMode>("file");
   const [sourceType, setSourceType] = useState<ListImportSourceType>("text");
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ListImportPreview | null>(null);
@@ -52,6 +62,17 @@ export default function ListsImport() {
         setFormError(t("listsImportPage.needsList"));
         return;
       }
+
+      if (mode === "url") {
+        const response = await apiPostJson<ListImportPreview>("/list-imports/preview-url", {
+          list_id: listId,
+          url: url.trim(),
+        });
+        setPreview(response);
+        setSkipBadRows(false);
+        return;
+      }
+
       const form = new FormData();
       form.set("source_type", sourceType);
       form.set("list_id", String(listId));
@@ -110,10 +131,12 @@ export default function ListsImport() {
     setResultListId(null);
     setFile(null);
     setText("");
+    setUrl("");
     setFormError(null);
   }
 
-  const canSubmit = (!!text.trim() || !!file) && (selectedListId === NEW_LIST_VALUE ? !!newListName.trim() : !!selectedListId);
+  const hasTargetList = selectedListId === NEW_LIST_VALUE ? !!newListName.trim() : !!selectedListId;
+  const canSubmit = hasTargetList && (mode === "url" ? !!url.trim() : !!text.trim() || !!file);
 
   return (
     <div>
@@ -162,44 +185,80 @@ export default function ListsImport() {
             </div>
           )}
 
-          <div className="cf-form-row">
-            <label htmlFor="li-source-type">{t("importPage.sourceType")}</label>
-            <select
-              id="li-source-type"
-              className="cf-select"
-              value={sourceType}
-              onChange={(e) => setSourceType(e.target.value as ListImportSourceType)}
-            >
-              {SOURCE_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {t(`listsImportPage.sourceTypes.${type}`)}
-                </option>
-              ))}
-            </select>
+          <div className="cf-form-row" style={{ flexDirection: "row", gap: 16 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, margin: 0 }}>
+              <input
+                type="radio"
+                name="li-mode"
+                checked={mode === "file"}
+                onChange={() => setMode("file")}
+              />
+              {t("listsImportPage.modeFile")}
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, margin: 0 }}>
+              <input type="radio" name="li-mode" checked={mode === "url"} onChange={() => setMode("url")} />
+              {t("listsImportPage.modeUrl")}
+            </label>
           </div>
 
-          <div className="cf-form-row">
-            <label htmlFor="li-text">{t("comparisonsPage.pasteList")}</label>
-            <textarea
-              id="li-text"
-              className="cf-textarea"
-              rows={8}
-              placeholder={t("listsImportPage.placeholder")}
-              value={text}
-              disabled={!!file}
-              onChange={(e) => setText(e.target.value)}
-            />
-          </div>
+          {mode === "file" && (
+            <>
+              <div className="cf-form-row">
+                <label htmlFor="li-source-type">{t("importPage.sourceType")}</label>
+                <select
+                  id="li-source-type"
+                  className="cf-select"
+                  value={sourceType}
+                  onChange={(e) => setSourceType(e.target.value as ListImportSourceType)}
+                >
+                  {SOURCE_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {t(`listsImportPage.sourceTypes.${type}`)}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          <div className="cf-form-row">
-            <label htmlFor="li-file">{t("comparisonsPage.orUploadFile")}</label>
-            <input
-              id="li-file"
-              type="file"
-              accept=".txt,.json"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            />
-          </div>
+              <div className="cf-form-row">
+                <label htmlFor="li-text">{t("comparisonsPage.pasteList")}</label>
+                <textarea
+                  id="li-text"
+                  className="cf-textarea"
+                  rows={8}
+                  placeholder={t("listsImportPage.placeholder")}
+                  value={text}
+                  disabled={!!file}
+                  onChange={(e) => setText(e.target.value)}
+                />
+              </div>
+
+              <div className="cf-form-row">
+                <label htmlFor="li-file">{t("comparisonsPage.orUploadFile")}</label>
+                <input
+                  id="li-file"
+                  type="file"
+                  accept={FILE_ACCEPT[sourceType]}
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                />
+              </div>
+            </>
+          )}
+
+          {mode === "url" && (
+            <div className="cf-form-row">
+              <label htmlFor="li-url">{t("listsImportPage.urlLabel")}</label>
+              <input
+                id="li-url"
+                type="url"
+                className="cf-input"
+                style={{ width: "100%" }}
+                placeholder="https://moxfield.com/decks/... or https://archidekt.com/decks/..."
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+              />
+              <p style={{ fontSize: 13, color: "var(--cf-muted)" }}>{t("listsImportPage.urlHint")}</p>
+            </div>
+          )}
 
           <div className="cf-btn-row">
             <button type="submit" className="cf-btn cf-btn-primary" disabled={!canSubmit || busy}>

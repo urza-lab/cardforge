@@ -47,6 +47,9 @@ class ListItemSection(str, enum.Enum):
 class ListImportSourceType(str, enum.Enum):
     text = "text"
     json = "json"
+    csv = "csv"
+    moxfield = "moxfield"
+    archidekt = "archidekt"
 
 
 class ListImportStatus(str, enum.Enum):
@@ -61,6 +64,17 @@ class ListImportRowStatus(str, enum.Enum):
     error = "error"
 
 
+class ListRefreshStatus(str, enum.Enum):
+    """CardList.refresh_status - only meaningful when source_url is set (see
+    app.services.list_refresh_service). None for manually-imported lists.
+    """
+
+    fetching = "FETCHING"
+    current = "CURRENT"
+    failed = "FAILED"
+    auth_required = "AUTH_REQUIRED"
+
+
 class CardList(Base):
     __tablename__ = "card_lists"
     __table_args__ = (UniqueConstraint("user_id", "name", name="uq_card_lists_user_id_name"),)
@@ -69,9 +83,19 @@ class CardList(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(128))
     list_type: Mapped[str] = mapped_column(String(16))  # "deck" | "cube"
-    # Phase 5: set for lists synced from a Moxfield/Archidekt URL; null for
-    # manually-imported lists (all of them, as of Phase 4).
+    # Set together, both null or both set: the Moxfield/Archidekt URL this
+    # list was last (re-)imported from, and which adapter to use to refresh
+    # it again ("moxfield" | "archidekt"). Null for manually-imported lists.
     source_url: Mapped[str | None] = mapped_column(String(512))
+    source_type: Mapped[str | None] = mapped_column(String(32))
+    # Set together with source_url/source_type once the first URL-sourced
+    # import is confirmed (see list_import_service.confirm_import) - state
+    # of the *last* refresh attempt, not a live/computed value. Staleness
+    # itself (elapsed time since last_refreshed_at) is computed on read by
+    # app.services.list_refresh_service.is_stale, not stored here.
+    refresh_status: Mapped[str | None] = mapped_column(String(32))
+    refresh_error: Mapped[str | None] = mapped_column(String(1024))
+    last_refreshed_at: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
@@ -125,6 +149,9 @@ class ListImport(Base):
     list_id: Mapped[int] = mapped_column(ForeignKey("card_lists.id", ondelete="CASCADE"), index=True)
     source_type: Mapped[str] = mapped_column(String(32))
     original_filename: Mapped[str | None] = mapped_column(String(256))
+    # Set for URL-sourced imports ("moxfield"/"archidekt" source_type); null
+    # for upload-based ones (original_filename is set instead).
+    source_url: Mapped[str | None] = mapped_column(String(512))
     file_hash: Mapped[str] = mapped_column(String(64), index=True)
     status: Mapped[str] = mapped_column(String(32), default=ListImportStatus.previewed.value)
     total_rows: Mapped[int] = mapped_column(default=0)

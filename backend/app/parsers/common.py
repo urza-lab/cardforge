@@ -179,6 +179,21 @@ def parse_section(raw: str | None) -> str:
     return value
 
 
+def parse_tags(raw: Any) -> list[str] | None:
+    """Shared by JSON list import and CSV list import - a tags cell/field is
+    either a JSON array of strings or a single comma-separated string.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        tags = [t.strip() for t in raw.split(",") if t.strip()]
+    elif isinstance(raw, list):
+        tags = [str(t).strip() for t in raw if str(t).strip()]
+    else:
+        raise RowValidationError(f"tags must be a list of strings or a comma-separated string, got {raw!r}")
+    return tags or None
+
+
 def map_collection_row(row_number: int, raw: dict[str, Any], detected: dict[str, str]) -> ParsedRow:
     """Shared row mapper for the two header/column-based formats (ManaBox and
     generic CSV): pulls each canonical field out of `raw` via `detected`,
@@ -211,6 +226,45 @@ def map_collection_row(row_number: int, raw: dict[str, Any], detected: dict[str,
             "purchase_price": str(price) if price is not None else None,
             "purchase_currency": (get("purchase_currency") or "").strip().upper() or None,
             "scryfall_id": parse_scryfall_id(get("scryfall_id")),
+        }
+    except RowValidationError as exc:
+        return ParsedRow(row_number=row_number, raw=clean_raw, error=str(exc))
+
+    return ParsedRow(row_number=row_number, raw=clean_raw, mapped=mapped)
+
+
+def map_list_row(row_number: int, raw: dict[str, Any], detected: dict[str, str]) -> ParsedRow:
+    """Shared row mapper for CSV-based deck/cube import (Phase 5) — like
+    map_collection_row above but shaped for CardListItem: section/category/
+    tags instead of condition/purchase price/purchase currency, which are
+    collection-only concepts.
+    """
+
+    def get(canonical_field: str) -> str | None:
+        header = detected.get(canonical_field)
+        if header is None:
+            return None
+        value = raw.get(header)
+        return value if isinstance(value, str) else None
+
+    clean_raw = {k: v for k, v in raw.items() if isinstance(k, str)}
+
+    try:
+        name = (get("name") or "").strip()
+        if not name:
+            raise RowValidationError("card name is required")
+        mapped: dict[str, Any] = {
+            "name": name,
+            "set_name": (get("set_name") or "").strip() or None,
+            "set_code": (get("set_code") or "").strip().upper() or None,
+            "collector_number": (get("collector_number") or "").strip() or None,
+            "quantity": parse_quantity(get("quantity") or ""),
+            "foil": parse_foil(get("foil")),
+            "language": (get("language") or "").strip().upper() or None,
+            "scryfall_id": parse_scryfall_id(get("scryfall_id")),
+            "section": parse_section(get("section")),
+            "category": (get("category") or "").strip() or None,
+            "tags": parse_tags(get("tags")),
         }
     except RowValidationError as exc:
         return ParsedRow(row_number=row_number, raw=clean_raw, error=str(exc))

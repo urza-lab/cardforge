@@ -2,14 +2,20 @@ import type { MissingCard } from "./comparison";
 
 export type ListType = "deck" | "cube";
 export type ListSection = "mainboard" | "commander" | "companion" | "sideboard" | "maybeboard" | "considering";
-export type ListImportSourceType = "text" | "json";
+export type ListImportSourceType = "text" | "json" | "csv" | "moxfield" | "archidekt";
 export type ListImportStatus = "previewed" | "confirmed" | "partially_confirmed" | "aborted";
+export type ListRefreshStatus = "FETCHING" | "CURRENT" | "FAILED" | "AUTH_REQUIRED";
 
 export interface CardList {
   id: number;
   name: string;
   list_type: ListType;
   source_url: string | null;
+  source_type: ListImportSourceType | null;
+  refresh_status: ListRefreshStatus | null;
+  refresh_error: string | null;
+  last_refreshed_at: string | null;
+  is_stale: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -49,6 +55,7 @@ export interface ListImportSummary {
   list_id: number;
   source_type: ListImportSourceType;
   original_filename: string | null;
+  source_url: string | null;
   status: ListImportStatus;
   total_rows: number;
   valid_rows: number;

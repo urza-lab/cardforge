@@ -4,7 +4,7 @@
 in Phase 2. Deck/cube manual import (text, JSON) landed in Phase 4 — see
 ARCHITECTURE.md "Documented default decisions" for why that moved earlier
 than the phase-plan table originally implied. Deck/cube **CSV** import and
-the Moxfield/Archidekt **public URL** adapters are still Phase 5.
+the Moxfield/Archidekt **public URL** adapters landed in Phase 5.
 
 All imports go through the same pipeline: file check → column/field
 detection → preview with editable column mapping → row validation → summary
@@ -45,8 +45,32 @@ Any CSV with at least a card-name column and a quantity column. The import
 preview shows detected columns and lets you map arbitrary headers to
 CardForge fields (name, set, collector number, quantity, foil, language,
 condition, price). Unmapped columns are ignored. **Collection import only**
-— deck/cube import uses text or JSON (see below) so section/category/tags
-survive the import; CSV deck/cube import is Phase 5.
+— it has no section/category/tags columns, so it can't carry a deck/cube's
+shape; use the **deck/cube CSV** format below (or text/JSON) for those.
+
+## Deck/cube CSV
+
+A separate CSV shape for deck/cube import (`app/parsers/list_csv.py`,
+`source_type: "csv"` on `POST /api/list-imports/preview`) — same tolerant
+header-detection/column-mapping mechanics as Generic CSV above, but mapped
+onto `CardListItem` fields instead of `CollectionItem`'s: no
+condition/purchase price/currency (not list concepts), but `section`,
+`category`, and `tags` columns instead, so a cube's category grouping or a
+deck's sideboard survive a CSV round trip the way they already did for text
+and JSON list import.
+
+| Field | Example |
+|---|---|
+| Card name | `Sol Ring` |
+| Set name / Set code | `Commander 2021` / `C21` |
+| Collector number | `263` |
+| Quantity | `1` |
+| Foil | `foil` / blank |
+| Language | `EN` |
+| Scryfall ID | `1f0d2e46-25e6-4415-8c00-53abaf7de520` |
+| Section | `commander` (blank defaults to `mainboard`, same values as text lists above) |
+| Category | `Ramp` (free text) |
+| Tags | `fast-mana,cheap` (comma-separated) |
 
 ## Text lists
 

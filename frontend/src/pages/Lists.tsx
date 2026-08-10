@@ -100,6 +100,7 @@ export default function Lists() {
                     {t("listsPage.columns.created")}
                     {sortIndicator("created_at")}
                   </th>
+                  <th>{t("sourcesPage.columns.status")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -110,6 +111,23 @@ export default function Lists() {
                     </td>
                     <td>{t(`listsPage.types.${item.list_type}`)}</td>
                     <td>{new Date(item.created_at).toLocaleDateString()}</td>
+                    <td>
+                      {item.source_url && (
+                        <span
+                          className={
+                            item.refresh_status === "FAILED" || item.refresh_status === "AUTH_REQUIRED"
+                              ? "cf-badge cf-badge-error"
+                              : item.is_stale
+                                ? "cf-badge cf-badge-warn"
+                                : "cf-badge cf-badge-ok"
+                          }
+                        >
+                          {item.is_stale
+                            ? t("listDetailPage.refreshStatus.STALE")
+                            : t(`listsImportPage.sourceTypes.${item.source_type}`)}
+                        </span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>

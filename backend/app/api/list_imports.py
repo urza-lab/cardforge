@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.database import get_db
 from app.models.lists import ListImport
 from app.parsers import LIST_PARSERS, RowValidationError
@@ -11,8 +14,11 @@ from app.schemas.lists import (
     ListImportPreviewResponse,
     ListImportRead,
     ListImportRowRead,
+    ListImportUrlRequest,
 )
+from app.security.ssrf_guard import AuthRequiredError, SsrfBlockedError
 from app.services import list_import_service, list_service
+from app.source_adapters.errors import SourceFetchError
 
 router = APIRouter(prefix="/api/list-imports", tags=["list-imports"])
 
@@ -30,6 +36,10 @@ async def preview_import(
     file: UploadFile = File(...),
     source_type: str = Form(...),
     list_id: int = Form(...),
+    # JSON-encoded {canonical_field: source_header}; csv only, lets the UI
+    # override auto-detected columns instead of re-uploading (mirrors
+    # app/api/imports.py's generic_csv column_mapping).
+    column_mapping: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ) -> ListImportPreviewResponse:
     if source_type not in LIST_PARSERS:
@@ -42,6 +52,13 @@ async def preview_import(
     if card_list is None:
         raise HTTPException(status_code=404, detail="list not found")
 
+    mapping_dict: dict[str, str] | None = None
+    if column_mapping:
+        try:
+            mapping_dict = json.loads(column_mapping)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail=f"column_mapping is not valid JSON: {exc}") from exc
+
     content = await file.read()
     if not content:
         raise HTTPException(status_code=400, detail="uploaded file is empty")
@@ -53,11 +70,37 @@ async def preview_import(
             source_type=source_type,
             content=content,
             original_filename=file.filename,
+            column_mapping=mapping_dict,
         )
     except RowValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=422, detail=f"file is not valid UTF-8 text: {exc}") from exc
+
+    return _to_preview_response(import_record)
+
+
+@router.post("/preview-url", response_model=ListImportPreviewResponse, status_code=201)
+def preview_import_from_url(
+    payload: ListImportUrlRequest, db: Session = Depends(get_db)
+) -> ListImportPreviewResponse:
+    card_list = list_service.get_list(db, payload.list_id)
+    if card_list is None:
+        raise HTTPException(status_code=404, detail="list not found")
+
+    user_agent = get_settings().scryfall_user_agent  # same "identify ourselves honestly" UA for every outbound fetch
+    try:
+        import_record = list_import_service.create_preview_from_url(
+            db, card_list=card_list, url=payload.url, user_agent=user_agent
+        )
+    except list_import_service.UnsupportedUrlError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SsrfBlockedError as exc:
+        raise HTTPException(status_code=400, detail=f"URL rejected: {exc}") from exc
+    except AuthRequiredError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except SourceFetchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return _to_preview_response(import_record)
 

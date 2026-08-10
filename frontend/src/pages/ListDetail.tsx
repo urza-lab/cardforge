@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
-import { apiGet, ApiError } from "../api/client";
+import { apiGet, apiPostJson, ApiError } from "../api/client";
 import { useSort } from "../hooks/useSort";
 import type { CardList, CardListItem, ListComparisonResponse } from "../types/lists";
 import type { ComparisonMode } from "../types/comparison";
 import type { UserSettings } from "../types/settings";
+
+const REFRESH_POLL_INTERVAL_MS = 3000;
 
 export default function ListDetail() {
   const { t } = useTranslation();
@@ -18,6 +20,8 @@ export default function ListDetail() {
   const [mode, setMode] = useState<ComparisonMode>("oracle");
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const fetchAll = useCallback(
     (comparisonMode: ComparisonMode) => {
@@ -45,9 +49,43 @@ export default function ListDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // While a refresh is in flight (this page or the periodic staleness sweep
+  // triggered it), poll for completion instead of leaving a stale FETCHING
+  // badge on screen forever - and once it lands, reload items/comparison
+  // too (a content-changing refresh replaces the list's items wholesale).
+  useEffect(() => {
+    if (cardList?.refresh_status !== "FETCHING" || !id) return;
+    const poll = setInterval(() => {
+      apiGet<CardList>(`/lists/${id}`)
+        .then((updated) => {
+          setCardList(updated);
+          if (updated.refresh_status !== "FETCHING") fetchAll(mode);
+        })
+        .catch(() => {
+          // transient - next poll tick retries
+        });
+    }, REFRESH_POLL_INTERVAL_MS);
+    return () => clearInterval(poll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cardList?.refresh_status, id]);
+
   function handleModeChange(newMode: ComparisonMode) {
     setMode(newMode);
     fetchAll(newMode);
+  }
+
+  async function handleRefresh() {
+    if (!id) return;
+    setRefreshing(true);
+    setRefreshError(null);
+    try {
+      const updated = await apiPostJson<CardList>(`/lists/${id}/refresh`, {});
+      setCardList(updated);
+    } catch (err) {
+      setRefreshError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   async function handleDelete() {
@@ -82,11 +120,59 @@ export default function ListDetail() {
     return <p>{t("common.loading")}</p>;
   }
 
+  const refreshBadgeClass =
+    cardList.refresh_status === "CURRENT" && !cardList.is_stale
+      ? "cf-badge cf-badge-ok"
+      : cardList.refresh_status === "FAILED" || cardList.refresh_status === "AUTH_REQUIRED"
+        ? "cf-badge cf-badge-error"
+        : "cf-badge cf-badge-warn";
+
   return (
     <div>
       <h2>
         {cardList.name} <span className="cf-badge">{t(`listsPage.types.${cardList.list_type}`)}</span>
       </h2>
+
+      {cardList.source_url && (
+        <div className="cf-card">
+          {refreshError && <div className="cf-alert cf-alert-error">{refreshError}</div>}
+          <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span>
+              {t("listDetailPage.importedFrom")}{" "}
+              <a href={cardList.source_url} target="_blank" rel="noreferrer">
+                {t(`listsImportPage.sourceTypes.${cardList.source_type}`)}
+              </a>
+            </span>
+            {cardList.refresh_status && (
+              <span className={refreshBadgeClass}>
+                {cardList.is_stale && cardList.refresh_status === "CURRENT"
+                  ? t("listDetailPage.refreshStatus.STALE")
+                  : t(`listDetailPage.refreshStatus.${cardList.refresh_status}`)}
+              </span>
+            )}
+            {cardList.last_refreshed_at && (
+              <span style={{ fontSize: 13, color: "var(--cf-muted)" }}>
+                {t("listDetailPage.lastRefreshed")} {new Date(cardList.last_refreshed_at).toLocaleString()}
+              </span>
+            )}
+            <button
+              className="cf-btn"
+              disabled={refreshing || cardList.refresh_status === "FETCHING"}
+              onClick={handleRefresh}
+            >
+              {cardList.refresh_status === "FETCHING"
+                ? t("listDetailPage.refreshing")
+                : t("listDetailPage.refreshNow")}
+            </button>
+          </div>
+          {cardList.refresh_status === "AUTH_REQUIRED" && (
+            <div className="cf-alert cf-alert-warn">{t("listDetailPage.authRequiredHint")}</div>
+          )}
+          {cardList.refresh_status === "FAILED" && cardList.refresh_error && (
+            <div className="cf-alert cf-alert-error">{cardList.refresh_error}</div>
+          )}
+        </div>
+      )}
 
       {comparison && (
         <div className="cf-card">

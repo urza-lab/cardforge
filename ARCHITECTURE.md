@@ -305,6 +305,82 @@ be decided without blocking implementation. All are changeable later.
   Confirmed cost: real sync against api.scryfall.com went from ~110k rows/
   ~77MB/~20s (`default_cards`) to substantially more — see CLAUDE.md status
   for the actual numbers from the last real sync.
+- **Moxfield/Archidekt adapters reuse `ParseResult`/`ParsedRow`
+  (`app.parsers.common`), not SOURCE_ADAPTERS.md's aspirational
+  `SourceAdapter`/`ParsedList`/`NormalizedList` types** (Phase 5,
+  `app/source_adapters/moxfield.py`, `archidekt.py`): both APIs are
+  real, verified-against-live-endpoint JSON fetchers whose output maps
+  cleanly onto the exact same row shape the text/JSON/CSV parsers already
+  produce, so `list_import_service._persist_preview` and `confirm_import`
+  serve URL-sourced and file-sourced imports through one code path with no
+  branching on origin. `app/source_adapters/common.py`'s `DeckFetchResult`
+  (deck name + `ParseResult`) is the only new type introduced. Both real
+  APIs 403 without a descriptive `User-Agent` (not `httpx`'s default) —
+  confirmed against live `api.moxfield.com` and `archidekt.com/api/decks`.
+- **SSRF guard resolves DNS and blocks by IP, not by hostname string
+  matching, and follows redirects manually** (Phase 5,
+  `app/security/ssrf_guard.py`): a hostname allowlist/blocklist alone can't
+  stop a public hostname resolving to a private IP, and `httpx`'s
+  `follow_redirects=True` would skip re-validation on each hop. Every
+  outbound source-adapter request (initial fetch and each redirect) is
+  checked individually; max 5 redirects. A TOCTOU/DNS-rebinding gap between
+  the check and the actual connection is accepted as a tradeoff for a
+  self-hosted hobby tool, documented in `SECURITY.md`, not solved with a
+  pinned-IP `httpx` transport.
+- **Deck/cube CSV import is its own parser
+  (`app/parsers/list_csv.py`, `source_type: "csv"`), not a reuse of
+  collection import's `generic_csv`/`manabox_csv`** (Phase 5): those two
+  map onto `CollectionItem` (condition/purchase price, no section/category/
+  tags concept); `list_csv.py` mirrors their tolerant header-detection/
+  column-mapping mechanics but maps onto `CardListItem`'s shape instead
+  (`section`/`category`/`tags`, no condition/price), via a new shared
+  `app.parsers.common.map_list_row` helper (parallel to the existing
+  `map_collection_row`). `parse_tags` (comma-separated string or JSON
+  array) was factored out of `json_list.py` into `common.py` so both JSON
+  and CSV list import share one implementation.
+- **A list's refresh state (`FETCHING`/`CURRENT`/`FAILED`/`AUTH_REQUIRED`)
+  is stored on `CardList`; staleness itself is computed on read, not
+  stored** (Phase 5, `app/services/list_refresh_service.py`): a refresh
+  *attempt* has a real outcome worth persisting (mirrors
+  `ScryfallSyncStatus`'s FETCHING/CURRENT/FAILED state machine, `app/
+  models/scryfall.py`), but "has it been too long since the last one"
+  is a pure function of `last_refreshed_at` and current time
+  (`is_stale()`, `STALE_AFTER = 7 days`, not user-configurable yet) — there
+  is nothing to keep in sync by storing a derived boolean.
+- **A refresh replaces a list's items wholesale (delete + re-run the
+  normal preview/confirm pipeline with `skip_bad_rows=True`), not a
+  field-by-field diff/upsert** (Phase 5, `list_refresh_service.run_refresh`):
+  a refresh is unattended (no user reviewing a preview), and reusing
+  `create_preview_from_url`/`confirm_import` means the refresh path is
+  exercised by the exact same tested code as an initial URL import. If the
+  freshly fetched content hashes identically to the last confirmed import
+  (via the existing duplicate-detection hash), nothing is replaced at all —
+  only `last_refreshed_at`/`refresh_status` update, since "checked, nothing
+  changed" is still a real successful check (see "no fake success" above),
+  not an excuse to skip recording it.
+- **`run_refresh`'s outer exception handler marks `FAILED` and re-raises
+  for any exception it didn't specifically anticipate**, not just the
+  expected `AuthRequiredError`/`SourceFetchError`/`SsrfBlockedError` cases
+  (Phase 5): found via a real bug during Phase 5 development — a worker
+  container running stale code (see CLAUDE.md gotcha #16) crashed a refresh
+  job outside any of the specific `except` clauses, and because
+  `trigger_refresh`'s "already FETCHING" guard has no other way to clear
+  that state, the affected list was permanently locked out of ever being
+  refreshed again. The catch-all ensures any failure — anticipated or not —
+  still flips `refresh_status` back to something `trigger_refresh` will
+  accept a retry against.
+- **The periodic staleness sweep is a plain `threading` loop inside the
+  worker process, not RQ's own scheduler** (Phase 5,
+  `app/workers/run_worker.py`): the installed `rq==2.1.0` has no
+  repeating/cron job primitive (`with_scheduler=True` only covers one-off
+  `enqueue_at`/`enqueue_in` calls) and no `rq-scheduler`/`rq.cron` package
+  is installed. A self-perpetuating `enqueue_at` chain (each run schedules
+  the next) was considered and rejected — it has no clean way to avoid
+  spawning a duplicate chain on every worker restart without adding
+  Redis-lock bookkeeping the sweep doesn't otherwise need. A daemon thread
+  that sleeps and enqueues `check_stale_lists` every 6 hours is enough for
+  a single-worker, single/few-user self-hosted tool, and dies cleanly with
+  the process instead of leaving orphaned scheduled state in Redis.
 
 ## Backend module boundaries
 

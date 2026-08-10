@@ -4,7 +4,7 @@ Context for Claude Code picking up this project. See `README.md` for the
 product description and `ARCHITECTURE.md` for the full phase plan and
 documented design decisions — read both before making changes.
 
-## Status (updated after Phase 4)
+## Status (updated after Phase 5)
 
 Phase 1 (Docker Compose skeleton, persistent secrets, FastAPI healthcheck,
 React/TS shell) is **complete and verified working end-to-end** on a
@@ -56,6 +56,39 @@ override correctly reverted all of them to English in the same live check.
 153 backend tests pass; `ruff`, `mypy`, and the frontend
 `lint`/`typecheck`/`build` are all clean.
 
+Phase 5 (Moxfield/Archidekt public URL adapters, deck/cube CSV import,
+refresh system, scheduler, stale handling) is **complete and verified
+end-to-end against real data and real live third-party APIs**: a real
+Moxfield deck (`moxfield.com/decks/R3Nv7DlrokW5uPuriAGBng`, 92 cards) and a
+real Archidekt deck (`archidekt.com/decks/1/fun_with_fungus`, 17 cards) were
+both fetched live during development; a real deck was imported from a
+Moxfield URL through the nginx proxy, resolved against the real Scryfall
+mirror, and refreshed — the refresh ran on the real `worker` container,
+made a real live call to `api.moxfield.com`, and flipped
+`FETCHING`→`CURRENT` in under a second. A real deck/cube CSV (with
+`section`/`category`/`tags` columns) was imported the same way. The SSRF
+guard (`app/security/ssrf_guard.py`) was verified against both a real
+external host (example.com, allowed) and real internal targets (localhost,
+`backend`, `169.254.169.254`, `127.0.0.1` — all blocked). A full `docker
+compose down && docker compose up -d --build` was verified to bring all six
+services back `Up`/`healthy` with the real 2,653-card collection and the
+real 532,468-row Scryfall mirror intact, followed by a fresh URL import +
+refresh cycle against the newly-built containers (not just the
+pre-restart ones). 212 backend tests pass (91% coverage); `ruff`, `mypy`,
+and the frontend `lint`/`typecheck`/`build` are all clean. The new frontend
+pages (Sources, the "from URL" import mode, per-list refresh controls) were
+verified via the built production bundle serving correctly and containing
+the new strings/routes — **not** via an actual browser click-through, since
+no browser-automation tool was available in this session; treat the UI as
+lint/typecheck/build-verified but not feature-verified until someone
+clicks through it once. See `ARCHITECTURE.md` "Documented default
+decisions" for the Phase 5 design choices (adapters reuse `ParseResult`
+instead of SOURCE_ADAPTERS.md's aspirational types, SSRF guard's manual
+per-hop redirect re-validation, deck/cube CSV as its own parser, refresh
+state machine vs. computed staleness, wholesale item replacement on
+refresh, the catch-all failure handler, and the plain-thread staleness
+sweep instead of RQ's scheduler).
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key
@@ -63,15 +96,15 @@ The LXC has its own push access — SSH deploy key
 remote set to `git@github.com:urza-lab/cardforge.git`. No separate `gh` CLI
 install on the LXC.
 
-**Next up: Phase 5** (Moxfield/Archidekt public URL adapters, deck/cube CSV
-import, refresh system, scheduler, stale handling). See `ARCHITECTURE.md`
+**Next up: Phase 6** (price cache, Scryfall/MTGJSON/Cardmarket(optional)/
+manual price providers, price profiles, budget filter). See `ARCHITECTURE.md`
 for the full 7-phase plan and "Documented default decisions" for the choices
 made along the way (default-user bootstrap, `/collections/default`,
 enum-as-VARCHAR, import preview persistence, duplicate-import flagging, JSON
 collection import, the single denormalized `scryfall_cards` table,
 resolution matching priority, ad-hoc non-persisted comparisons, minimal
 `user_settings` table, the separate list-import pipeline, text-list section
-semantics, multi-list shopping-list pooling).
+semantics, multi-list shopping-list pooling, the Phase 5 decisions above).
 
 ## Environment
 
@@ -189,6 +222,37 @@ semantics, multi-list shopping-list pooling).
     --force-recreate <service>` fixes it. Cause unconfirmed (possibly a
     compose quirk when rebuilding multiple services back-to-back) — treat
     the verification step as routine, not just a one-off fix.
+16. **A running `worker` container can silently be missing
+    `docker-compose.dev.yml`'s bind mount even when `backend` has it**
+    (found in Phase 5): `docker compose restart worker` does *not* re-apply
+    compose file overrides — it was still running a 13-hours-stale image
+    with no `./backend/app:/app/app` mount, so newly added job functions
+    (`app/workers/jobs.py`) didn't exist in that container's view of the
+    module, and RQ's `import_attribute` failed with a confusing
+    `AttributeError`/`ValueError: Invalid attribute name` deep inside `rq`
+    rather than a normal Python `ImportError`. `docker inspect
+    cardforge-worker --format '{{range .Mounts}}...'` showed the mount
+    genuinely missing; `docker compose -f docker-compose.yml -f
+    docker-compose.dev.yml up -d --force-recreate worker` fixed it. Same
+    root cause as gotcha #15 (a running container silently out of sync with
+    the current compose config) but via `restart` instead of `up --build` —
+    treat "does this container's actual mounts/image match what the
+    compose files currently say" as something to verify after *any*
+    container lifecycle command during dev work, not just rebuilds.
+17. **The production image only installs `requirements.txt`, not
+    `requirements-dev.txt`** (confirmed in Phase 5, not a new decision —
+    `backend/Dockerfile` has always had a single `runtime` target) — `ruff`/
+    `mypy`/`pytest` are only present in a container that either bind-mounts
+    the dev tools in some other way or had them `pip install --user`'d
+    manually into its writable layer. Recreating that container (`up
+    --build`, `--force-recreate`) wipes a manual install since it's not
+    baked into the image. For verifying a *plain prod build* (as CLAUDE.md's
+    own "Testing a change" recipe does), `docker cp` the
+    `requirements-dev.txt`/`requirements.txt`/`tests/`/`data/examples`
+    paths into the running container and `pip install --user -r
+    requirements-dev.txt` first, or just use `docker compose -f
+    docker-compose.yml -f docker-compose.dev.yml` for the container you
+    intend to run dev tooling against instead.
 
 ## Principles to keep enforcing in later phases
 
