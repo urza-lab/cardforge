@@ -487,6 +487,42 @@ be decided without blocking implementation. All are changeable later.
   grafana's own uid (472), not the shared 1000:1000 the backend/worker-
   readable secrets use — see `SECRET_SPECS`' per-secret owner override,
   since nothing but the grafana container itself ever reads that file.
+- **Popular-deck discovery (post-Phase-7, user-requested) is a local cache
+  synced on demand, never a live query per browse request** (`app/models/
+  discover.py` `PopularDeck`, `app/source_adapters/moxfield.py`
+  `run_deck_discovery_sync`): the same FETCHING/CURRENT/FAILED sync-job
+  shape as Scryfall/MTGJSON, for the same reason — Moxfield's real search
+  API rate-limited this project (HTTP 429) after a burst of unpaced
+  requests during development, so hitting it live on every page view would
+  be both slow for the user and unfriendly to Moxfield's servers. The sync
+  itself paces its own handful of requests with a fixed delay
+  (`POPULAR_DECKS_REQUEST_DELAY_SECONDS`) rather than firing them all at
+  once.
+- **Decks only, no cubes, in the popular-deck browser — a deliberate scope
+  cut, not a gap nobody noticed:** Moxfield's public deck-search API has no
+  `cube` format value, and no separate public cube-search endpoint was
+  found either (a couple of guessed URLs both 404'd). Presented as an
+  explicit choice rather than assumed: build decks now with real verified
+  data, or hold off building anything and research further, or ship cubes
+  anyway with worse data quality. "Decks now" was chosen — see
+  SOURCE_ADAPTERS.md for the two paths not taken (a Moxfield cube API that
+  may not exist publicly; a new, unverified CubeCobra adapter).
+- **One-click "import" reuses the existing URL-import pipeline wholesale —
+  no new import/parsing logic was written for deck discovery at all:** a
+  cached `PopularDeck.source_url` is a real `moxfield.com/decks/...` URL,
+  so "import this" is just `POST /api/lists` (create) →
+  `POST /api/list-imports/preview-url` → `POST /api/list-imports/{id}/
+  confirm` — the exact same three calls the "Import Lists → From a URL"
+  flow already makes (Phase 5). The imported list also comes out with
+  `source_url`/`source_type` set, so it's refreshable through the existing
+  Phase 5 refresh system for free, with no discovery-specific code needed
+  for that either.
+- **The color-identity filter is a subset match, not an exact match**
+  (`app/services/discover_service.py` `list_popular_decks`): filtering by
+  "WU" also returns a mono-W or mono-U deck, not only decks whose identity
+  is *exactly* {W, U} — matching how deckbuilding actually works ("what
+  can I build in these colors") rather than a literal string-equality
+  filter almost nothing would pass.
 
 ## Backend module boundaries
 

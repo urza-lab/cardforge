@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.collections import router as collections_router
 from app.api.comparisons import router as comparisons_router
 from app.api.dashboard import router as dashboard_router
+from app.api.discover import router as discover_router
 from app.api.health import router as health_router
 from app.api.imports import router as imports_router
 from app.api.list_imports import router as list_imports_router
@@ -74,6 +75,7 @@ app.include_router(mtgjson_router)
 app.include_router(prices_router)
 app.include_router(dashboard_router)
 app.include_router(metrics_router)
+app.include_router(discover_router)
 
 
 @app.get("/api")

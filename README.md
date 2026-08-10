@@ -19,6 +19,9 @@ pricing and refresh step is deterministic and reproducible.
   something is.
 - A native dashboard shows collection/deck stats at a glance, plus an
   optional real Grafana + Prometheus setup for deeper metrics history.
+- Browse real popular Commander decks (ranked by Moxfield's own view/like
+  counts) and import one against your collection with a single click,
+  instead of hunting down a decklist URL yourself.
 
 ## Why no AI
 

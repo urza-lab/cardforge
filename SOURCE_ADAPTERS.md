@@ -34,6 +34,24 @@ sweep — see `app/services/list_refresh_service.py` and
 `app/workers/run_worker.py`); a refresh replaces the list's items wholesale
 rather than diffing, and never touches the list if nothing changed.
 
+**Moxfield deck discovery (post-Phase-7, done, user-requested):**
+`app/source_adapters/moxfield.py`'s `fetch_popular_decks`/
+`run_deck_discovery_sync` — a real popularity-ranked deck browser ("what's
+worth importing"), not a curated/hardcoded list. Queries Moxfield's own
+public `/v2/decks/search` endpoint (`sortType=views` and `sortType=likes`,
+`fmt=commander`), merges and dedupes into a local `popular_decks` cache
+(`POST /api/discover/decks/sync`, `GET /api/discover/decks/status`,
+`GET /api/discover/decks?sort=...&color_identity=...`) — never queried live
+per browse request (see ARCHITECTURE.md for why). **Deck URLs only, same
+as the URL-import adapter above** — Moxfield's search endpoint has no
+`cube` format value, and no separate public cube-search endpoint was found
+either; Commander decks only was a deliberate, explicit scope decision
+(user asked, evaluated the options, chose "decks now, skip cubes rather
+than ship something half-working"), not an oversight. Archidekt's own
+search/browse API wasn't reachable without authentication in a quick
+check, so this is Moxfield-only for now — nothing rules out adding
+Archidekt discovery later if that changes.
+
 **MTGJSON (Phase 6, done):** implemented as `app/source_adapters/mtgjson.py`
 — a real price-data sync (`AllIdentifiers.json.xz` + `AllPricesToday.json`,
 see PRICING.md for the full join logic), its own `PriceSyncState`
@@ -89,8 +107,10 @@ class SourceAdapter(Protocol):
 | Archidekt public URL | public_url | 5, done | Deck URLs only, no login |
 | Deck/cube CSV upload | file | 5, done | See IMPORT_FORMATS.md "Deck/cube CSV" |
 | MTGJSON | api | 6, done | Price data — see PRICING.md |
+| Moxfield deck discovery | api | post-7, done | Popular Commander decks only, no cubes — see above |
 | Cardmarket (direct API) | api | not planned | MTGJSON already relays real Cardmarket EUR retail data — see PRICING.md |
 | Generic configurable source | api/public_url | not planned | No concrete need yet — not scheduled |
+| Moxfield/CubeCobra cube discovery | api | not planned | No public Moxfield cube-search API found; a CubeCobra adapter would be new, unverified work |
 
 ## Status values
 

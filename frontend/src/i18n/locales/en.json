@@ -6,6 +6,7 @@
     "collectionImport": "Import Collection",
     "lists": "Decks & Cubes",
     "listsImport": "Import Lists",
+    "discover": "Discover Decks",
     "comparisons": "Comparisons",
     "sources": "Sources",
     "prices": "Prices",
@@ -187,6 +188,27 @@
     "intro": "Decks and cubes imported from a public Moxfield or Archidekt URL. Each stays linked to its source and can be refreshed to pick up changes made there.",
     "empty": "No lists have been imported from a URL yet — see Import Lists.",
     "columns": { "provider": "Source", "status": "Status" }
+  },
+  "discoverPage": {
+    "intro": "Real popular Commander decks from Moxfield's own public rankings (by views or likes) — browse, then import one with a click instead of hunting for a URL yourself. Cached locally; hit \"Sync now\" to refresh the list.",
+    "status": {
+      "NOT_STARTED": "Not synced yet",
+      "FETCHING": "Syncing…",
+      "CURRENT": "Up to date",
+      "FAILED": "Sync failed"
+    },
+    "cachedDecks": "Cached decks",
+    "syncNow": "Sync now",
+    "syncing": "Syncing…",
+    "sortBy": "Sort by",
+    "sortViews": "Most viewed",
+    "sortLikes": "Most liked",
+    "colorFilter": "Color identity",
+    "empty": "No popular decks cached yet — click \"Sync now\" above.",
+    "columns": { "author": "Author", "colors": "Colors", "views": "Views", "likes": "Likes" },
+    "import": "Import",
+    "importFailed": "Import failed",
+    "viewList": "View list"
   },
   "pricesPage": {
     "mtgjson": {

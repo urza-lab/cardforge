@@ -5,6 +5,7 @@ import Collection from "./pages/Collection";
 import CollectionImport from "./pages/CollectionImport";
 import Comparisons from "./pages/Comparisons";
 import Dashboard from "./pages/Dashboard";
+import Discover from "./pages/Discover";
 import ListDetail from "./pages/ListDetail";
 import Lists from "./pages/Lists";
 import ListsImport from "./pages/ListsImport";
@@ -19,6 +20,7 @@ const NAV_ITEMS: Array<{ to: string; key: string }> = [
   { to: "/collection/import", key: "nav.collectionImport" },
   { to: "/lists", key: "nav.lists" },
   { to: "/lists/import", key: "nav.listsImport" },
+  { to: "/discover", key: "nav.discover" },
   { to: "/comparisons", key: "nav.comparisons" },
   { to: "/sources", key: "nav.sources" },
   { to: "/prices", key: "nav.prices" },
@@ -68,6 +70,7 @@ export default function App() {
           <Route path="/lists" element={<Lists />} />
           <Route path="/lists/import" element={<ListsImport />} />
           <Route path="/lists/:id" element={<ListDetail />} />
+          <Route path="/discover" element={<Discover />} />
           <Route path="/comparisons" element={<Comparisons />} />
           <Route path="/sources" element={<Sources />} />
           <Route path="/prices" element={<Prices />} />

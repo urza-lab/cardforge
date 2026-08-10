@@ -6,6 +6,7 @@
     "collectionImport": "Sammlung importieren",
     "lists": "Decks & Cubes",
     "listsImport": "Listen importieren",
+    "discover": "Decks entdecken",
     "comparisons": "Vergleiche",
     "sources": "Quellen",
     "prices": "Preise",
@@ -187,6 +188,27 @@
     "intro": "Decks und Cubes, die von einer öffentlichen Moxfield- oder Archidekt-URL importiert wurden. Jede bleibt mit ihrer Quelle verknüpft und kann aktualisiert werden, um dortige Änderungen zu übernehmen.",
     "empty": "Noch keine Liste von einer URL importiert — siehe Listen importieren.",
     "columns": { "provider": "Quelle", "status": "Status" }
+  },
+  "discoverPage": {
+    "intro": "Echte populäre Commander-Decks aus Moxfields eigenen öffentlichen Ranglisten (nach Views oder Likes) — durchsuchen und mit einem Klick importieren, statt selbst nach einer URL zu suchen. Lokal zwischengespeichert; \"Jetzt synchronisieren\" aktualisiert die Liste.",
+    "status": {
+      "NOT_STARTED": "Noch nicht synchronisiert",
+      "FETCHING": "Synchronisiert…",
+      "CURRENT": "Aktuell",
+      "FAILED": "Synchronisierung fehlgeschlagen"
+    },
+    "cachedDecks": "Zwischengespeicherte Decks",
+    "syncNow": "Jetzt synchronisieren",
+    "syncing": "Synchronisiert…",
+    "sortBy": "Sortieren nach",
+    "sortViews": "Meiste Views",
+    "sortLikes": "Meiste Likes",
+    "colorFilter": "Farbidentität",
+    "empty": "Noch keine populären Decks zwischengespeichert — klicke oben auf \"Jetzt synchronisieren\".",
+    "columns": { "author": "Autor", "colors": "Farben", "views": "Views", "likes": "Likes" },
+    "import": "Importieren",
+    "importFailed": "Import fehlgeschlagen",
+    "viewList": "Liste ansehen"
   },
   "pricesPage": {
     "mtgjson": {

@@ -1,4 +1,10 @@
 from app.models.collection import Collection, CollectionItem
+from app.models.discover import (
+    DISCOVERY_SYNC_STATE_ID,
+    DeckDiscoverySyncState,
+    DeckDiscoverySyncStatus,
+    PopularDeck,
+)
 from app.models.imports import Import, ImportRow, ImportRowStatus, ImportSourceType, ImportStatus
 from app.models.lists import (
     CardList,
@@ -30,11 +36,14 @@ __all__ = [
     "DEFAULT_PRICE_PROFILE_NAME",
     "DEFAULT_PROVIDER_PRIORITY",
     "DEFAULT_USER_ID",
+    "DISCOVERY_SYNC_STATE_ID",
     "SYNC_STATE_ID",
     "CardList",
     "CardListItem",
     "Collection",
     "CollectionItem",
+    "DeckDiscoverySyncState",
+    "DeckDiscoverySyncStatus",
     "Import",
     "ImportRow",
     "ImportRowStatus",
@@ -47,6 +56,7 @@ __all__ = [
     "ListImportStatus",
     "ListItemSection",
     "ListType",
+    "PopularDeck",
     "PriceObservation",
     "PriceProfile",
     "PriceProvider",

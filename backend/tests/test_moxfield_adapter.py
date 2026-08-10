@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
+from app.core.database import get_sessionmaker
+from app.models.discover import DISCOVERY_SYNC_STATE_ID, DeckDiscoverySyncState, PopularDeck
 from app.security.ssrf_guard import AuthRequiredError
 from app.source_adapters import moxfield
 from app.source_adapters.errors import InvalidUrlError, SourceFetchError
@@ -115,3 +119,94 @@ def test_fetch_and_parse_bad_quantity_is_a_row_error(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(moxfield, "guarded_get", lambda url, **kwargs: _response(200, deck))
     fetch_result = moxfield.fetch_and_parse("https://moxfield.com/decks/abc", user_agent="test-agent")
     assert fetch_result.parse_result.rows[0].status == "error"
+
+
+def _search_response(decks: list[dict[str, object]]) -> httpx.Response:
+    request = httpx.Request("GET", "https://api.moxfield.com/v2/decks/search")
+    return httpx.Response(200, content=json.dumps({"data": decks}), request=request)
+
+
+def test_fetch_popular_decks_paginates_both_sorts_and_dedupes(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(moxfield.time, "sleep", lambda *_: None)
+    calls: list[dict[str, object]] = []
+
+    shared = {
+        "publicId": "shared-1", "name": "Shared Deck", "createdByUser": {"displayName": "Alice"},
+        "publicUrl": "https://moxfield.com/decks/shared-1", "format": "commander",
+        "viewCount": 500, "likeCount": 50, "colorIdentity": ["W", "U"],
+    }
+
+    def fake_get(url: str, params: dict[str, object], headers: dict[str, str], timeout: float) -> httpx.Response:
+        calls.append(dict(params))
+        unique = {
+            "publicId": f"{params['sortType']}-{params['pageNumber']}",
+            "name": "Unique", "createdByUser": {"displayName": "Bob"},
+            "publicUrl": "https://moxfield.com/decks/unique", "format": "commander",
+            "viewCount": 10, "likeCount": 1, "colorIdentity": [],
+        }
+        return _search_response([shared, unique])
+
+    monkeypatch.setattr(moxfield.httpx, "get", fake_get)
+
+    decks = moxfield.fetch_popular_decks("test-agent")
+
+    assert len(calls) == 4  # 2 sorts x 2 pages
+    assert {c["sortType"] for c in calls} == {"views", "likes"}
+    # 1 shared deck (deduped across all 4 responses) + 4 page/sort-unique ones
+    assert len(decks) == 5
+    shared_result = next(d for d in decks if d.external_id == "shared-1")
+    assert shared_result.name == "Shared Deck"
+    assert shared_result.author == "Alice"
+    assert shared_result.color_identity == ["W", "U"]
+    assert shared_result.view_count == 500
+
+
+def test_fetch_popular_decks_raises_on_non_200(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(moxfield.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(
+        moxfield.httpx,
+        "get",
+        lambda url, params, headers, timeout: httpx.Response(429, request=httpx.Request("GET", url)),
+    )
+    with pytest.raises(SourceFetchError):
+        moxfield.fetch_popular_decks("test-agent")
+
+
+def test_run_deck_discovery_sync_success(monkeypatch: pytest.MonkeyPatch):
+    entry = moxfield.PopularDeckEntry(
+        external_id="abc", name="Test Deck", author="Alice", source_url="https://moxfield.com/decks/abc",
+        format="commander", view_count=100, like_count=10, color_identity=["W"],
+    )
+    monkeypatch.setattr(moxfield, "fetch_popular_decks", lambda user_agent, **kwargs: [entry])
+
+    db = get_sessionmaker()()
+    try:
+        state = moxfield.run_deck_discovery_sync(db)
+        assert state.status == "CURRENT"
+        assert state.deck_count == 1
+
+        decks = db.query(PopularDeck).all()
+        assert len(decks) == 1
+        assert decks[0].name == "Test Deck"
+        assert decks[0].source == "moxfield"
+    finally:
+        db.close()
+
+
+def test_run_deck_discovery_sync_failure_records_error(monkeypatch: pytest.MonkeyPatch):
+    def _boom(user_agent: str, **kwargs: object) -> list[moxfield.PopularDeckEntry]:
+        raise SourceFetchError("search failed")
+
+    monkeypatch.setattr(moxfield, "fetch_popular_decks", _boom)
+
+    db = get_sessionmaker()()
+    try:
+        with pytest.raises(SourceFetchError):
+            moxfield.run_deck_discovery_sync(db)
+
+        state = db.get(DeckDiscoverySyncState, DISCOVERY_SYNC_STATE_ID)
+        assert state is not None
+        assert state.status == "FAILED"
+        assert "search failed" in (state.error_message or "")
+    finally:
+        db.close()

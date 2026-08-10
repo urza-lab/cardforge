@@ -159,6 +159,29 @@ each tool's bare defaults instead of this repo's actual config. Fixed
 separately from Phase 7 (commit `5a23da6`) — see gotcha #17 and
 ARCHITECTURE.md.
 
+**Post-Phase-7, user-requested:** a "Discover Decks" feature (browse real
+popular Commander decks, one-click import) — the user asked after seeing
+Binderbrew do something similar, comparing their collection against a pool
+of decks/cubes rather than hunting for URLs one at a time. Researched live
+before building anything: Moxfield's real public search API
+(`/v2/decks/search`, sortable by real view/like counts) works and was
+verified against live data; no public cube-search API was found on
+Moxfield, and Archidekt's search API needs auth. Presented both findings
+to the user, who chose decks-only rather than cubes-with-worse-data or
+further research — see ARCHITECTURE.md "Documented default decisions" and
+SOURCE_ADAPTERS.md. **Complete and verified end-to-end**: a real sync
+landed 291 real popular decks (verified against Moxfield's live
+`viewCount`/`likeCount`/`colorIdentity` fields) in ~6 seconds; a real
+one-click import of the actual top-viewed cached deck
+("Winota: Snowball Stax", 551,963 real views) through the exact API
+sequence the frontend uses landed a real 303-card list, with
+`source_url`/`source_type` set so it's refreshable through the existing
+Phase 5 refresh system for free. 271 backend tests pass; `ruff`, `mypy`,
+and the frontend `lint`/`typecheck`/`build` are all clean. A full `docker
+compose down && up -d --build` cycle was verified afterward with the real
+collection, the real Scryfall/MTGJSON caches, and the real 291-deck
+discovery cache all intact.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key
@@ -398,6 +421,17 @@ variant of collection leverage (ARCHITECTURE.md).
     compose ps` with a permission-denied line in its logs — treat that
     combination as "check who owns the bind-mounted path vs. which uid the
     image actually runs as" before assuming anything more exotic.
+23. **Moxfield's public search API (`/v2/decks/search`) really does rate-
+    limit (HTTP 429) after a burst of unpaced requests** (found live during
+    research for the post-Phase-7 discovery feature, testing ~8 different
+    `sortType` values back-to-back with no delay). Any future code hitting
+    this endpoint (or the per-deck `/v2/decks/all/{id}` one) needs pacing
+    between requests — see `POPULAR_DECKS_REQUEST_DELAY_SECONDS` in
+    `app/source_adapters/moxfield.py` for the pattern already in place.
+    Also confirmed live: `sortType` only accepts `views`/`likes`/`created`/
+    `updated`/`name` (not `trending`/`popularity`/`hot`/`velocity`/
+    `random`), and there is no `cube` value for `fmt` — don't re-guess
+    these; see SOURCE_ADAPTERS.md for what's actually confirmed to work.
 
 ## Principles to keep enforcing in later phases
 
