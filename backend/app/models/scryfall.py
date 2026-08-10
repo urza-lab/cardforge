@@ -1,8 +1,14 @@
-"""Local mirror of Scryfall's "default_cards" bulk data — see
-SOURCE_ADAPTERS.md and ARCHITECTURE.md "Documented default decisions" for
-why a single denormalized table (one row per printing) is enough for both
-oracle-mode and printing-mode comparison, instead of separate oracle/printing
-tables.
+"""Local mirror of Scryfall's "all_cards" bulk data — see SOURCE_ADAPTERS.md
+and ARCHITECTURE.md "Documented default decisions" for why a single
+denormalized table (one row per printing) is enough for both oracle-mode and
+printing-mode comparison, instead of separate oracle/printing tables.
+
+Uses `all_cards`, not the smaller `default_cards` (Phase 3's original
+choice) — `default_cards` omits a printing's non-English version entirely
+when an English version of the same card exists, which meant `printed_name`
+(the localized display name — see app.services.display_name_service, Phase
+4) was only ever available for the small set of cards printed exclusively
+in one non-English language.
 """
 from __future__ import annotations
 
@@ -34,7 +40,10 @@ class ScryfallCard(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)  # Scryfall's printing id (UUID)
     oracle_id: Mapped[str] = mapped_column(String(36), index=True)
-    name: Mapped[str] = mapped_column(String(256), index=True)
+    name: Mapped[str] = mapped_column(String(256), index=True)  # canonical English name, always present
+    # The name as actually printed on this card, only set when it differs
+    # from `name` (i.e. lang != "en") - see display_name_service.
+    printed_name: Mapped[str | None] = mapped_column(String(256))
     set_code: Mapped[str] = mapped_column(String(16))
     set_name: Mapped[str] = mapped_column(String(128))
     collector_number: Mapped[str] = mapped_column(String(32))
@@ -63,7 +72,7 @@ class ScryfallSyncState(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     status: Mapped[str] = mapped_column(String(32), default=ScryfallSyncStatus.not_started.value)
-    bulk_data_type: Mapped[str] = mapped_column(String(32), default="default_cards")
+    bulk_data_type: Mapped[str] = mapped_column(String(32), default="all_cards")
     # Scryfall's own "updated_at" for the bulk file, i.e. how fresh the data
     # we downloaded actually is - distinct from `finished_at` (when *we*
     # finished processing it).

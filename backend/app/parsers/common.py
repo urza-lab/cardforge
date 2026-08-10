@@ -31,6 +31,10 @@ CANONICAL_FIELDS = (
 
 VALID_CONDITIONS = {"NM", "LP", "MP", "HP", "DMG"}
 
+# Deck/cube list sections, see IMPORT_FORMATS.md "Text lists". Collection
+# import has no concept of these; only list import (Phase 4) uses this.
+VALID_SECTIONS = {"mainboard", "commander", "companion", "sideboard", "maybeboard", "considering"}
+
 
 class RowValidationError(ValueError):
     """Raised for a problem confined to one row/entry (caught per-row) or,
@@ -163,6 +167,15 @@ def parse_scryfall_id(raw: str | None) -> str | None:
     # exact printing resolution against it is Phase 3's job, not this one's.
     if len(value) != 36 or value.count("-") != 4:
         raise RowValidationError(f"scryfall id '{raw}' does not look like a UUID")
+    return value
+
+
+def parse_section(raw: str | None) -> str:
+    if raw is None or not raw.strip():
+        return "mainboard"
+    value = raw.strip().lower()
+    if value not in VALID_SECTIONS:
+        raise RowValidationError(f"section '{raw}' is not one of {', '.join(sorted(VALID_SECTIONS))}")
     return value
 
 

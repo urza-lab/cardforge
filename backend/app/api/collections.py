@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.schemas.collection import CollectionCreate, CollectionItemRead, CollectionRead, ResolutionSummaryRead
-from app.services import collection_service, scryfall_resolution
+from app.services import collection_service, display_name_service, export_service, scryfall_resolution, settings_service
 
 router = APIRouter(prefix="/api/collections", tags=["collections"])
 
@@ -43,7 +43,27 @@ def list_collection_items(collection_id: int, db: Session = Depends(get_db)) -> 
     collection = collection_service.get_collection(db, collection_id)
     if collection is None:
         raise HTTPException(status_code=404, detail="collection not found")
-    return [CollectionItemRead.model_validate(i) for i in collection_service.list_items(db, collection_id)]
+    items = collection_service.list_items(db, collection_id)
+    override = settings_service.get_settings(db).card_name_language
+    display_names = display_name_service.get_display_names(db, items, override_language=override)
+    return [
+        CollectionItemRead.model_validate(item).model_copy(update={"display_name": display_names[item.id]})
+        for item in items
+    ]
+
+
+@router.get("/{collection_id}/export.csv")
+def export_collection_csv(collection_id: int, db: Session = Depends(get_db)) -> Response:
+    collection = collection_service.get_collection(db, collection_id)
+    if collection is None:
+        raise HTTPException(status_code=404, detail="collection not found")
+    csv_text = export_service.collection_items_to_csv(collection_service.list_items(db, collection_id))
+    filename = f"{collection.name}.csv".replace('"', "")
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/{collection_id}/resolve", response_model=ResolutionSummaryRead)

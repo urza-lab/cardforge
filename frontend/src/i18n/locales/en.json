@@ -38,6 +38,7 @@
     "distinctEntries": "Distinct entries",
     "totalCards": "Total cards",
     "empty": "Your collection is empty.",
+    "exportCsv": "Export CSV",
     "columns": {
       "name": "Name",
       "set": "Set",
@@ -110,11 +111,48 @@
     },
     "rowErrors": "Lines that couldn't be parsed"
   },
+  "listsPage": {
+    "name": "Name",
+    "namePlaceholder": "e.g. Atraxa Superfriends",
+    "type": "Type",
+    "types": { "deck": "Deck", "cube": "Cube" },
+    "create": "Create",
+    "empty": "No decks or cubes yet.",
+    "columns": { "name": "Name", "type": "Type", "created": "Created" }
+  },
+  "listsImportPage": {
+    "targetList": "Deck / cube",
+    "chooseList": "Choose a list…",
+    "newList": "+ New list…",
+    "needsList": "Pick a list or name a new one first.",
+    "sourceTypes": { "text": "Text list", "json": "JSON" },
+    "placeholder": "4 Lightning Bolt\n1 Sol Ring (C21) 263\nCommander: Atraxa, Praetors' Voice",
+    "viewList": "View list",
+    "columns": { "section": "Section" },
+    "sections": {
+      "mainboard": "Mainboard",
+      "commander": "Commander",
+      "companion": "Companion",
+      "sideboard": "Sideboard",
+      "maybeboard": "Maybeboard",
+      "considering": "Considering"
+    }
+  },
+  "listDetailPage": {
+    "empty": "This list has no cards yet.",
+    "category": "Category",
+    "exportCsv": "Export CSV",
+    "delete": "Delete list"
+  },
   "settingsPage": {
     "saved": "Saved.",
     "defaultComparisonMode": "Default comparison mode",
     "preferredCurrency": "Preferred currency",
-    "currencyHint": "Used for price displays in later phases (not applied anywhere yet)."
+    "currencyHint": "Used for price displays in later phases (not applied anywhere yet).",
+    "cardNameLanguage": "Force card name language",
+    "cardNameLanguageAuto": "Auto (per card, as imported)",
+    "cardNameLanguages": { "de": "German", "en": "English" },
+    "cardNameLanguageHint": "By default, each card's name is shown in the language recorded for it on import. Forcing a language here shows every card in that language where a localized name is available, falling back to English otherwise."
   },
   "common": {
     "loading": "Loading…",

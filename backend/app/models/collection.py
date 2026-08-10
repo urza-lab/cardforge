@@ -31,7 +31,12 @@ class Collection(Base):
     items: Mapped[list[CollectionItem]] = relationship(
         back_populates="collection", cascade="all, delete-orphan"
     )
-    imports: Mapped[list[Import]] = relationship(back_populates="collection")
+    # passive_deletes=True: don't have the ORM SELECT+UPDATE(SET NULL) every
+    # Import row when a Collection is deleted (its default behavior without
+    # this) - imports.collection_id is NOT NULL, so that would fail outright.
+    # Trust the FK's own ON DELETE CASCADE (see the initial migration) to
+    # remove them in the same statement instead.
+    imports: Mapped[list[Import]] = relationship(back_populates="collection", passive_deletes=True)
 
 
 class CollectionItem(Base):

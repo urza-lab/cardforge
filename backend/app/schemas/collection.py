@@ -25,6 +25,11 @@ class CollectionItemRead(BaseModel):
 
     id: int
     card_name: str
+    # Not an ORM column - always overwritten by the API layer via
+    # display_name_service before the response goes out (see
+    # app/api/collections.py). Defaults to card_name only if that step is
+    # ever skipped, so this never renders as literally blank.
+    display_name: str = ""
     set_code: str | None
     set_name: str | None
     collector_number: str | None

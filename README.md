@@ -31,17 +31,20 @@ from now. See the project's design principles in `ARCHITECTURE.md`.
 ## Status
 
 This repository is being built in phases (see `ARCHITECTURE.md` for the
-phase plan). **Phases 1–3 are complete**: the Docker Compose stack,
+phase plan). **Phases 1–4 are complete**: the Docker Compose stack,
 persistent secrets, FastAPI health checks, and the React/TypeScript shell
 (English/German UI) are up and testable; collection import — ManaBox CSV,
 generic CSV, text lists, and JSON, each with a preview/confirm/abort flow
 and per-row error reporting — is implemented end to end (see
-`IMPORT_FORMATS.md`); and a local Scryfall card-data mirror, automatic
-collection resolution against it, and both comparison modes (any printing /
-exact printing) are live on the Comparisons page — paste or upload a
-decklist and see what's buildable from your collection today. Later phases
-(deck/cube pages, pricing, refresh system, dashboards) land incrementally on
-top of this foundation.
+`IMPORT_FORMATS.md`); a local Scryfall card-data mirror (all languages),
+automatic collection resolution against it, and both comparison modes (any
+printing / exact printing) are live on the Comparisons page; and decks/cubes
+have their own manual text/JSON import, detail pages with a live buildability
+comparison, CSV export, and a cross-list shopping list. Each card's name
+displays in whatever language your import recorded for it by default, or a
+single forced language (German/English) from Settings. Later phases
+(Moxfield/Archidekt import, pricing, refresh system, dashboards) land
+incrementally on top of this foundation.
 
 ## Quick start
 

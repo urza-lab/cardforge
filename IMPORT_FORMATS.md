@@ -1,9 +1,10 @@
 # IMPORT_FORMATS
 
-**Status:** parsers land in Phase 2 (collection: ManaBox/generic CSV, text,
-JSON) and Phase 5 (deck/cube: text, CSV, JSON, public URLs). This document
-specifies the target formats so importers can be built against a stable
-spec.
+**Status:** collection import (ManaBox CSV, generic CSV, text, JSON) landed
+in Phase 2. Deck/cube manual import (text, JSON) landed in Phase 4 — see
+ARCHITECTURE.md "Documented default decisions" for why that moved earlier
+than the phase-plan table originally implied. Deck/cube **CSV** import and
+the Moxfield/Archidekt **public URL** adapters are still Phase 5.
 
 All imports go through the same pipeline: file check → column/field
 detection → preview with editable column mapping → row validation → summary
@@ -43,38 +44,56 @@ pure functions with no DB access).
 Any CSV with at least a card-name column and a quantity column. The import
 preview shows detected columns and lets you map arbitrary headers to
 CardForge fields (name, set, collector number, quantity, foil, language,
-condition, price). Unmapped columns are ignored.
+condition, price). Unmapped columns are ignored. **Collection import only**
+— deck/cube import uses text or JSON (see below) so section/category/tags
+survive the import; CSV deck/cube import is Phase 5.
 
 ## Text lists
 
-One card per line, formats accepted:
+One card per line. **Collection** text import (Phase 2,
+`app/parsers/text_list.py`) accepts plain `<quantity> <name>` lines only —
+section headers are a validation error there, since a collection has no
+concept of "sideboard". **Deck/cube** text import (Phase 4,
+`app/parsers/list_text.py`) additionally accepts section headers:
 
 ```
 4 Lightning Bolt
 1 Sol Ring (C21) 263
 Commander: Atraxa, Praetors' Voice
+Sideboard:
+1 Rest in Peace
 ```
 
-Supported line prefixes/sections for deck import (Phase 5):
-`Commander:`, `Companion:`, `Sideboard:`, `Maybeboard:`, `Considering:` — any
-line before the first section header is treated as mainboard.
+Supported section headers: `Commander:`, `Companion:`, `Sideboard:`,
+`Maybeboard:`, `Considering:`. A header applies to every line after it until
+the next header (so `Sideboard:` followed by several lines puts all of them
+in the sideboard) — put mainboard cards first, unheaded, and put the special
+sections at the end, matching the example above. A quantity prefix is
+optional and defaults to 1 (`Commander: Atraxa, Praetors' Voice` needs no
+`1`). Only `mainboard`/`commander`/`companion` count toward "is this list
+buildable" (see `app/services/comparison_service.py`
+`REQUIRED_LIST_SECTIONS`) — `sideboard`/`maybeboard`/`considering` are
+informational only.
 
 ## JSON
 
-A structured list/collection export:
+A structured list/collection export, shared by collection and deck/cube
+import (`app/parsers/json_list.py`):
 
 ```json
 {
   "name": "My Cube",
   "cards": [
-    { "name": "Lightning Bolt", "set": "LEA", "collector_number": "161", "quantity": 1 }
+    { "name": "Lightning Bolt", "set": "LEA", "collector_number": "161", "quantity": 1 },
+    { "name": "Sol Ring", "quantity": 1, "section": "commander", "category": "Ramp", "tags": ["fast-mana"] }
   ]
 }
 ```
 
-Extra fields (`category`, `tags`, `foil`, `language`, `condition`) are
-preserved when present and used where relevant (e.g. cube category
-coverage, Phase 4).
+`section` (defaults to `mainboard` if absent, same values as text lists
+above), `category` (free text, e.g. a cube's archetype/role grouping), and
+`tags` (a list of strings, or a comma-separated string) are parsed and
+stored for deck/cube import; collection import simply doesn't read them.
 
 ## Duplicate import prevention
 

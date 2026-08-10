@@ -1,10 +1,10 @@
-"""JSON collection import — see IMPORT_FORMATS.md "JSON".
+"""JSON collection/list import — see IMPORT_FORMATS.md "JSON".
 
 Accepts `{"name": ..., "cards": [...]}` or a bare `[...]` array of card
-objects. Extra fields (`category`, `tags`, ...) are preserved verbatim in
-`raw` even though Phase 2's collection model doesn't use them yet — cube
-category coverage (Phase 4) reads them from the row's raw data at that point
-rather than requiring a re-import.
+objects. Shared by collection import (Phase 2) and list/deck/cube import
+(Phase 4): `section`/`category`/`tags` are parsed into `mapped` for list
+import to use; collection import (app/services/import_service.py) simply
+never reads those three keys.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from app.parsers.common import (
     parse_price,
     parse_quantity,
     parse_scryfall_id,
+    parse_section,
 )
 
 
@@ -54,6 +55,18 @@ def _as_str(value: Any) -> str | None:
     return text or None
 
 
+def _as_tags(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        tags = [t.strip() for t in value.split(",") if t.strip()]
+    elif isinstance(value, list):
+        tags = [str(t).strip() for t in value if str(t).strip()]
+    else:
+        raise RowValidationError(f"tags must be a list of strings or a comma-separated string, got {value!r}")
+    return tags or None
+
+
 def _parse_entry(row_number: int, entry: Any) -> ParsedRow:
     if not isinstance(entry, dict):
         return ParsedRow(row_number=row_number, raw={"value": entry}, error="card entry must be a JSON object")
@@ -81,6 +94,9 @@ def _parse_entry(row_number: int, entry: Any) -> ParsedRow:
             "purchase_price": str(price) if price is not None else None,
             "purchase_currency": (_as_str(entry.get("purchase_currency")) or "").upper() or None,
             "scryfall_id": parse_scryfall_id(_as_str(entry.get("scryfall_id"))),
+            "section": parse_section(_as_str(entry.get("section"))),
+            "category": _as_str(entry.get("category")),
+            "tags": _as_tags(entry.get("tags")),
         }
     except RowValidationError as exc:
         return ParsedRow(row_number=row_number, raw=raw, error=str(exc))

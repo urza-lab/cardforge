@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.comparison import ComparisonMode, ComparisonResult, ComparisonSettings, OwnedCard, RequiredCard, compare
 from app.models.collection import CollectionItem
+from app.models.lists import CardListItem
 from app.parsers import PARSERS
 from app.services import scryfall_resolution
 
@@ -26,6 +27,13 @@ from app.services import scryfall_resolution
 # collection" - manabox_csv is collection-export-shaped (condition, price,
 # language columns a decklist wouldn't have) and is intentionally excluded.
 DECKLIST_SOURCE_TYPES = {"text_list", "json", "generic_csv"}
+
+# Sections counted as "needed to build this list" for a saved CardList
+# comparison (see app/models/lists.py ListItemSection). sideboard/maybeboard/
+# considering are explicitly optional/exploratory, not part of "is this
+# buildable" — README.md scopes CardForge around Commander decks and cubes,
+# which don't have a required sideboard the way constructed formats do.
+REQUIRED_LIST_SECTIONS = {"mainboard", "commander", "companion"}
 
 
 class UnsupportedSourceTypeError(ValueError):
@@ -94,8 +102,15 @@ def run_comparison(
             )
         )
 
+    owned = _owned_cards(db, collection_id)
+    comparison_mode: ComparisonMode = "printing" if mode == "printing" else "oracle"
+    result = compare(owned, required, ComparisonSettings(mode=comparison_mode))
+    return ComparisonRun(result=result, row_errors=row_errors)
+
+
+def _owned_cards(db: Session, collection_id: int) -> list[OwnedCard]:
     owned_items = db.scalars(select(CollectionItem).where(CollectionItem.collection_id == collection_id))
-    owned = [
+    return [
         OwnedCard(
             name=item.card_name,
             quantity=item.quantity,
@@ -105,6 +120,58 @@ def run_comparison(
         for item in owned_items
     ]
 
+
+def _required_cards_for_lists(db: Session, list_ids: list[int]) -> list[RequiredCard]:
+    list_items = db.scalars(
+        select(CardListItem).where(
+            CardListItem.list_id.in_(list_ids), CardListItem.section.in_(REQUIRED_LIST_SECTIONS)
+        )
+    )
+    return [
+        RequiredCard(
+            name=item.card_name,
+            quantity=item.quantity,
+            oracle_id=item.resolved_oracle_id,
+            scryfall_card_id=item.resolved_scryfall_card_id,
+        )
+        for item in list_items
+    ]
+
+
+def run_list_comparison(
+    db: Session, *, list_id: int, collection_id: int, mode: str = "oracle"
+) -> ComparisonResult:
+    """Compare a saved CardList's mainboard/commander/companion items
+    against a collection's already-resolved items. Unlike run_comparison
+    above, there's no parsing step (the list is already persisted and
+    resolved) — just the required/owned build and the pure engine call.
+    """
+    if mode not in ("oracle", "printing"):
+        raise InvalidComparisonModeError(f"mode must be 'oracle' or 'printing', got '{mode}'")
+
+    required = _required_cards_for_lists(db, [list_id])
+    owned = _owned_cards(db, collection_id)
     comparison_mode: ComparisonMode = "printing" if mode == "printing" else "oracle"
-    result = compare(owned, required, ComparisonSettings(mode=comparison_mode))
-    return ComparisonRun(result=result, row_errors=row_errors)
+    return compare(owned, required, ComparisonSettings(mode=comparison_mode))
+
+
+def run_shopping_list(
+    db: Session, *, list_ids: list[int], collection_id: int, mode: str = "oracle"
+) -> ComparisonResult:
+    """Same idea as run_list_comparison but across several lists at once,
+    compared against ONE shared owned pool in a single compare() call - not
+    N independent comparisons summed together. That distinction matters: if
+    two decks each want 1 copy of a card you own exactly 1 of, summing two
+    independent "you have it" comparisons would double-count that copy and
+    under-report what you actually need to buy. Feeding every list's
+    required cards into one compare() call lets the engine's owned-pool
+    decrement (see app/comparison/engine.py) account for that copy being
+    claimed by whichever list's requirement is processed first.
+    """
+    if mode not in ("oracle", "printing"):
+        raise InvalidComparisonModeError(f"mode must be 'oracle' or 'printing', got '{mode}'")
+
+    required = _required_cards_for_lists(db, list_ids)
+    owned = _owned_cards(db, collection_id)
+    comparison_mode: ComparisonMode = "printing" if mode == "printing" else "oracle"
+    return compare(owned, required, ComparisonSettings(mode=comparison_mode))

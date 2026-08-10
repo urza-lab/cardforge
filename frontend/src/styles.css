@@ -90,6 +90,8 @@ body {
 }
 .cf-table th { color: var(--cf-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; }
 .cf-table tr.cf-row-error td { background: rgba(255, 107, 107, 0.06); }
+.cf-table th.cf-th-sortable { cursor: pointer; user-select: none; }
+.cf-table th.cf-th-sortable:hover { color: var(--cf-text); }
 
 .cf-form-row { margin-bottom: 14px; display: flex; flex-direction: column; gap: 6px; }
 .cf-form-row label { font-size: 13px; color: var(--cf-muted); }

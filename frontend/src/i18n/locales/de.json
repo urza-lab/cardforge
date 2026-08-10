@@ -38,6 +38,7 @@
     "distinctEntries": "Verschiedene Einträge",
     "totalCards": "Karten gesamt",
     "empty": "Deine Sammlung ist leer.",
+    "exportCsv": "CSV exportieren",
     "columns": {
       "name": "Name",
       "set": "Set",
@@ -110,11 +111,48 @@
     },
     "rowErrors": "Nicht lesbare Zeilen"
   },
+  "listsPage": {
+    "name": "Name",
+    "namePlaceholder": "z.B. Atraxa Superfriends",
+    "type": "Typ",
+    "types": { "deck": "Deck", "cube": "Cube" },
+    "create": "Erstellen",
+    "empty": "Noch keine Decks oder Cubes.",
+    "columns": { "name": "Name", "type": "Typ", "created": "Erstellt" }
+  },
+  "listsImportPage": {
+    "targetList": "Deck / Cube",
+    "chooseList": "Liste wählen…",
+    "newList": "+ Neue Liste…",
+    "needsList": "Wähle zuerst eine Liste oder benenne eine neue.",
+    "sourceTypes": { "text": "Textliste", "json": "JSON" },
+    "placeholder": "4 Lightning Bolt\n1 Sol Ring (C21) 263\nCommander: Atraxa, Praetors' Voice",
+    "viewList": "Liste ansehen",
+    "columns": { "section": "Bereich" },
+    "sections": {
+      "mainboard": "Hauptdeck",
+      "commander": "Commander",
+      "companion": "Companion",
+      "sideboard": "Sideboard",
+      "maybeboard": "Vielleicht",
+      "considering": "In Erwägung"
+    }
+  },
+  "listDetailPage": {
+    "empty": "Diese Liste hat noch keine Karten.",
+    "category": "Kategorie",
+    "exportCsv": "CSV exportieren",
+    "delete": "Liste löschen"
+  },
   "settingsPage": {
     "saved": "Gespeichert.",
     "defaultComparisonMode": "Standard-Vergleichsmodus",
     "preferredCurrency": "Bevorzugte Währung",
-    "currencyHint": "Wird in späteren Phasen für Preisanzeigen genutzt (aktuell noch nirgends aktiv)."
+    "currencyHint": "Wird in späteren Phasen für Preisanzeigen genutzt (aktuell noch nirgends aktiv).",
+    "cardNameLanguage": "Kartennamen-Sprache erzwingen",
+    "cardNameLanguageAuto": "Automatisch (pro Karte, wie importiert)",
+    "cardNameLanguages": { "de": "Deutsch", "en": "Englisch" },
+    "cardNameLanguageHint": "Standardmäßig wird jede Karte in der beim Import erfassten Sprache angezeigt. Erzwingst du hier eine Sprache, werden alle Karten in dieser Sprache angezeigt, sofern ein lokalisierter Name vorhanden ist — sonst auf Englisch."
   },
   "common": {
     "loading": "Lädt…",

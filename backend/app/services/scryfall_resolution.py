@@ -38,6 +38,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.collection import CollectionItem
+from app.models.lists import CardListItem
 from app.models.scryfall import ScryfallCard
 
 DEFAULT_LANGUAGE = "en"
@@ -105,7 +106,15 @@ def resolve_card(
     return _match_oracle_id_by_name(db, name), None
 
 
-def resolve_item(db: Session, item: CollectionItem) -> None:
+# CollectionItem and CardListItem have the same identity/resolution columns
+# by design (see app/models/lists.py), so one function resolves either. A
+# structural Protocol looked cleaner but mypy doesn't match SQLAlchemy's
+# Mapped[...] descriptors against plain-typed Protocol members - an explicit
+# Union is what actually type-checks.
+ResolvableItem = CollectionItem | CardListItem
+
+
+def resolve_item(db: Session, item: ResolvableItem) -> None:
     """Mutates `item` in place (resolved_oracle_id / resolved_scryfall_card_id
     / resolved_at). Does not commit — callers batch-commit after resolving
     however many items they're touching.

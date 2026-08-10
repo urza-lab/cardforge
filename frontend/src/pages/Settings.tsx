@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { apiGet, apiPutJson, ApiError } from "../api/client";
 import type { ComparisonMode } from "../types/comparison";
-import type { UserSettings, UserSettingsUpdate } from "../types/settings";
+import type { CardNameLanguage, UserSettings, UserSettingsUpdate } from "../types/settings";
+
+const AUTO_VALUE = "auto";
 
 export default function Settings() {
   const { t } = useTranslation();
@@ -69,6 +71,27 @@ export default function Settings() {
             />
             <p style={{ fontSize: 12, color: "var(--cf-muted)", margin: 0 }}>
               {t("settingsPage.currencyHint")}
+            </p>
+          </div>
+
+          <div className="cf-form-row">
+            <label htmlFor="settings-card-name-language">{t("settingsPage.cardNameLanguage")}</label>
+            <select
+              id="settings-card-name-language"
+              className="cf-select"
+              value={settings.card_name_language ?? AUTO_VALUE}
+              disabled={busy}
+              onChange={(e) => {
+                const value = e.target.value;
+                save({ card_name_language: value === AUTO_VALUE ? null : (value as CardNameLanguage) });
+              }}
+            >
+              <option value={AUTO_VALUE}>{t("settingsPage.cardNameLanguageAuto")}</option>
+              <option value="de">{t("settingsPage.cardNameLanguages.de")}</option>
+              <option value="en">{t("settingsPage.cardNameLanguages.en")}</option>
+            </select>
+            <p style={{ fontSize: 12, color: "var(--cf-muted)", margin: 0 }}>
+              {t("settingsPage.cardNameLanguageHint")}
             </p>
           </div>
         </div>

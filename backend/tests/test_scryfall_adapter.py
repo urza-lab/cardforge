@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from app.core.config import get_settings
 from app.core.database import get_sessionmaker
 from app.models.scryfall import SYNC_STATE_ID, ScryfallCard, ScryfallSyncState, ScryfallSyncStatus
 from app.source_adapters import scryfall as scryfall_adapter
@@ -130,10 +131,15 @@ def test_run_bulk_sync_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "download_bulk_file",
         lambda uri, dest, settings: dest.write_bytes(fixture_path.read_bytes()),
     )
+    # Without an explicit scryfall_cache_dir here, run_bulk_sync would write
+    # to the *real* Settings default (/data/scryfall_cache) - the same host
+    # directory the actual running app uses - and overwrite the real ~110k-row
+    # bulk file with this test's 3-line fixture. Route it into tmp_path instead.
+    test_settings = get_settings().model_copy(update={"scryfall_cache_dir": str(tmp_path)})
 
     db = get_sessionmaker()()
     try:
-        state = scryfall_adapter.run_bulk_sync(db)
+        state = scryfall_adapter.run_bulk_sync(db, settings=test_settings)
         assert state.status == ScryfallSyncStatus.current.value
         assert state.card_count == 2  # TOKEN is excluded
         assert state.error_message is None

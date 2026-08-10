@@ -5,6 +5,7 @@ import Collection from "./pages/Collection";
 import CollectionImport from "./pages/CollectionImport";
 import Comparisons from "./pages/Comparisons";
 import Dashboard from "./pages/Dashboard";
+import ListDetail from "./pages/ListDetail";
 import Lists from "./pages/Lists";
 import ListsImport from "./pages/ListsImport";
 import Prices from "./pages/Prices";
@@ -66,6 +67,7 @@ export default function App() {
           <Route path="/collection/import" element={<CollectionImport />} />
           <Route path="/lists" element={<Lists />} />
           <Route path="/lists/import" element={<ListsImport />} />
+          <Route path="/lists/:id" element={<ListDetail />} />
           <Route path="/comparisons" element={<Comparisons />} />
           <Route path="/sources" element={<Sources />} />
           <Route path="/prices" element={<Prices />} />

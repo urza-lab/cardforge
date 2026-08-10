@@ -9,6 +9,7 @@ export interface Collection {
 export interface CollectionItem {
   id: number;
   card_name: string;
+  display_name: string;
   set_code: string | null;
   set_name: string | null;
   collector_number: string | null;

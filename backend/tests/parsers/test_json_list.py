@@ -45,3 +45,37 @@ def test_entry_that_is_not_an_object_is_row_error():
 def test_set_field_maps_to_set_code():
     result = parse_json_list('{"cards": [{"name": "Sol Ring", "quantity": 1, "set": "c21"}]}')
     assert result.rows[0].mapped["set_code"] == "C21"
+
+
+def test_default_section_is_mainboard():
+    result = parse_json_list('{"cards": [{"name": "Sol Ring", "quantity": 1}]}')
+    assert result.rows[0].mapped["section"] == "mainboard"
+
+
+def test_explicit_section_is_parsed():
+    result = parse_json_list('{"cards": [{"name": "Atraxa", "quantity": 1, "section": "commander"}]}')
+    assert result.rows[0].mapped["section"] == "commander"
+
+
+def test_invalid_section_is_a_row_error():
+    result = parse_json_list('{"cards": [{"name": "A", "quantity": 1, "section": "nonsense"}]}')
+    assert result.rows[0].status == "error"
+
+
+def test_category_and_tags_are_parsed():
+    result = parse_json_list(
+        '{"cards": [{"name": "Sol Ring", "quantity": 1, "category": "Ramp", "tags": ["fast-mana", "artifact"]}]}'
+    )
+    mapped = result.rows[0].mapped
+    assert mapped["category"] == "Ramp"
+    assert mapped["tags"] == ["fast-mana", "artifact"]
+
+
+def test_tags_as_comma_separated_string():
+    result = parse_json_list('{"cards": [{"name": "Sol Ring", "quantity": 1, "tags": "a, b, c"}]}')
+    assert result.rows[0].mapped["tags"] == ["a", "b", "c"]
+
+
+def test_tags_wrong_type_is_a_row_error():
+    result = parse_json_list('{"cards": [{"name": "Sol Ring", "quantity": 1, "tags": 5}]}')
+    assert result.rows[0].status == "error"

@@ -11,8 +11,11 @@ from app.api.collections import router as collections_router
 from app.api.comparisons import router as comparisons_router
 from app.api.health import router as health_router
 from app.api.imports import router as imports_router
+from app.api.list_imports import router as list_imports_router
+from app.api.lists import router as lists_router
 from app.api.scryfall import router as scryfall_router
 from app.api.settings import router as settings_router
+from app.api.shopping_list import router as shopping_list_router
 from app.core.config import get_settings
 from app.core.database import get_sessionmaker
 from app.core.logging import configure_logging
@@ -60,6 +63,9 @@ app.include_router(imports_router)
 app.include_router(scryfall_router)
 app.include_router(comparisons_router)
 app.include_router(settings_router)
+app.include_router(lists_router)
+app.include_router(list_imports_router)
+app.include_router(shopping_list_router)
 
 
 @app.get("/api")

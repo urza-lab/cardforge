@@ -4,7 +4,7 @@ Context for Claude Code picking up this project. See `README.md` for the
 product description and `ARCHITECTURE.md` for the full phase plan and
 documented design decisions — read both before making changes.
 
-## Status (updated after Phase 3)
+## Status (updated after Phase 4)
 
 Phase 1 (Docker Compose skeleton, persistent secrets, FastAPI healthcheck,
 React/TS shell) is **complete and verified working end-to-end** on a
@@ -28,20 +28,50 @@ compose up -d --build` was verified to bring all six services back
 `Up`/`healthy` with the real collection and Scryfall mirror intact
 (bind-mounted Postgres data, not re-synced/re-imported).
 
+Phase 4 (deck/cube data model + manual text/JSON import, detail pages,
+interactive tables, CSV exports, shopping list) is **complete and verified
+end-to-end against real data**: a real deck (mainboard + commander +
+sideboard, via text import) was imported through the nginx proxy, resolved
+against the real Scryfall mirror, compared against the user's real
+2,653-card collection (`GET /api/lists/{id}/comparison`), exported to CSV,
+and included in a real shopping-list call — all through the proxy, not just
+against the backend directly. Note "budget filter" moved to Phase 6 and
+manual deck/cube import moved here from Phase 5 — see ARCHITECTURE.md.
+A real bug was caught by the end-to-end smoke test specifically (not by the
+unit/API test suite, which hadn't exercised the case) — see gotcha #14.
+
+Also added during Phase 4, user-requested after the phase's initial
+completion: per-card display-name language (`app/services/
+display_name_service.py`), each card shown by default in whatever language
+its own import data recorded, with a "force language" override in Settings
+(German/English/auto). This required switching the Scryfall bulk mirror
+from `default_cards` to `all_cards` (see ARCHITECTURE.md) — verified with a
+real sync: **532,468** printings in ~3m15s (vs. `default_cards`'~110k/~20s).
+Re-resolving the real collection against the new mirror still hit 100%
+exact (2,653/2,653); with the language setting on auto, **2,601 of 2,653**
+real collection items got a translated display name (the rest are cards
+with no German printing to mirror at all) — a `card_name_language: "en"`
+override correctly reverted all of them to English in the same live check.
+
+153 backend tests pass; `ruff`, `mypy`, and the frontend
+`lint`/`typecheck`/`build` are all clean.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
-The LXC now has its own push access — SSH deploy key
+The LXC has its own push access — SSH deploy key
 (`~/.ssh/cardforge_deploy`, write access, scoped to this one repo only),
 remote set to `git@github.com:urza-lab/cardforge.git`. No separate `gh` CLI
 install on the LXC.
 
-**Next up: Phase 4** (deck/cube detail pages, interactive tables, exports,
-shopping list, budget filter). See `ARCHITECTURE.md` for the full 7-phase
-plan and "Documented default decisions" for the Phase 2/3 choices made along
-the way (default-user bootstrap, `/collections/default`, enum-as-VARCHAR,
-import preview persistence, duplicate-import flagging, JSON collection
-import, the single denormalized `scryfall_cards` table, resolution matching
-priority, ad-hoc non-persisted comparisons, minimal `user_settings` table).
+**Next up: Phase 5** (Moxfield/Archidekt public URL adapters, deck/cube CSV
+import, refresh system, scheduler, stale handling). See `ARCHITECTURE.md`
+for the full 7-phase plan and "Documented default decisions" for the choices
+made along the way (default-user bootstrap, `/collections/default`,
+enum-as-VARCHAR, import preview persistence, duplicate-import flagging, JSON
+collection import, the single denormalized `scryfall_cards` table,
+resolution matching priority, ad-hoc non-persisted comparisons, minimal
+`user_settings` table, the separate list-import pipeline, text-list section
+semantics, multi-list shopping-list pooling).
 
 ## Environment
 
@@ -132,6 +162,33 @@ priority, ad-hoc non-persisted comparisons, minimal `user_settings` table).
     `worker` container listens on, so an ill-configured test run could make
     the real worker perform a real sync against the real database. See
     DEVELOPMENT.md "Tests".
+14. **A `relationship()` to a NOT NULL foreign-keyed child needs
+    `passive_deletes=True` (or ORM-level `cascade="all, delete-orphan"`) or
+    deleting the parent 500s** (found in Phase 4 via the end-to-end smoke
+    test, not the unit tests — see `app/models/collection.py`
+    `Collection.imports` and `app/models/lists.py` `CardList.imports`).
+    Without one of those two, SQLAlchemy's default behavior on parent
+    delete is to `UPDATE ... SET child_fk = NULL` for every related child
+    row before deleting the parent — which fails outright when that FK
+    column is `NOT NULL` (as `imports.collection_id` and
+    `list_imports.list_id` both are), even though the column already has
+    `ON DELETE CASCADE` at the database level. `passive_deletes=True` tells
+    the ORM to trust that DB-level cascade instead of managing it itself.
+    The bug was invisible to `test_delete_list` because that test deleted a
+    list with *no* import history — the failure only triggers when a related
+    child row actually exists, which the real E2E smoke test happened to
+    have (a real imported deck) and the original unit test didn't.
+15. **After `docker compose up -d --build <service>`, verify the running
+    container's image ID actually matches the freshly built one** — don't
+    trust the compose CLI output alone (found in Phase 4: rebuilding
+    `frontend` right after rebuilding `backend` produced a new image, but
+    the *running* `frontend` container kept using the previous one; no
+    "Recreate" line appeared in the compose output either). `docker inspect
+    <container> --format '{{.Image}}'` vs. `docker inspect <image>:latest
+    --format '{{.Id}}'` catches the mismatch; `docker compose up -d
+    --force-recreate <service>` fixes it. Cause unconfirmed (possibly a
+    compose quirk when rebuilding multiple services back-to-back) — treat
+    the verification step as routine, not just a one-off fix.
 
 ## Principles to keep enforcing in later phases
 

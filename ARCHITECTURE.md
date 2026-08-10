@@ -27,13 +27,19 @@
 | 1 | Compose stack, persistent secrets, FastAPI healthcheck, React/TS shell, CI skeleton |
 | 2 | DB models, Alembic, collection + CSV/text/JSON import, import preview/errors |
 | 3 | Scryfall normalization, oracle/printing comparison modes, user settings |
-| 4 | Deck/cube detail pages, interactive tables, exports, shopping list, budget filter |
-| 5 | Moxfield/Archidekt public URL adapters, refresh system, scheduler, stale handling |
-| 6 | Price cache, Scryfall/MTGJSON/Cardmarket(optional)/manual providers, price profiles |
+| 4 | Deck/cube data model + manual text/JSON import, detail pages, interactive tables, CSV exports, shopping list |
+| 5 | Moxfield/Archidekt public URL adapters, deck/cube CSV import, refresh system, scheduler, stale handling |
+| 6 | Price cache, Scryfall/MTGJSON/Cardmarket(optional)/manual providers, price profiles, budget filter |
 | 7 | Native dashboard, Grafana + Prometheus, collection leverage, backup docs |
 
 Each phase is independently startable and testable; see the "Testing this
 phase" note at the top of each phase's PR/commit.
+
+Phase 4's row differs from the original plan in two ways worth calling out
+(see "Documented default decisions" below): deck/cube manual import moved
+here from Phase 5 (detail pages need something to show), and "budget
+filter" moved to Phase 6 (it needs real price data that doesn't exist until
+then — a filter with nothing to filter by isn't a feature, it's a stub).
 
 ## Documented default decisions
 
@@ -221,6 +227,84 @@ be decided without blocking implementation. All are changeable later.
   RQ jobs onto whatever Redis DB is configured, which (at index 0) is the
   same one the real `worker` container listens on. See DEVELOPMENT.md
   "Tests".
+- **Manual deck/cube import moved from Phase 5 into Phase 4** (see
+  `app/models/lists.py`, `app/parsers/list_text.py`,
+  `app/services/list_import_service.py`): Phase 4's own deliverable ("deck/
+  cube detail pages") needs decks/cubes to exist before there's anything to
+  show a detail page for, and text/JSON manual import is buildable with
+  infrastructure Phase 2/3 already proved out (the parser/preview/confirm
+  pattern, Scryfall resolution). What actually stayed in Phase 5 is the part
+  that name is really about: the Moxfield/Archidekt *public URL* adapters
+  and the refresh/staleness system around them — plus CSV deck/cube import,
+  cut for scope (see below), not because it needs anything Phase 5-specific.
+- **`ListImport`/`ListImportRow` duplicate `Import`/`ImportRow`'s shape
+  rather than generalizing one shared import pipeline for both collections
+  and lists** (Phase 4): the two pipelines write structurally different
+  target rows (`CollectionItem` has `condition`/price fields; `CardListItem`
+  has `section`/`category`/`tags`), and a shared table would need a nullable
+  `collection_id` *and* nullable `list_id` with an application-enforced
+  "exactly one is set" invariant instead of the database enforcing it via
+  `NOT NULL`. Keeping them separate costs some duplicated code but means a
+  bug in one pipeline structurally cannot touch the other's data — see
+  `app/models/lists.py` module docstring.
+- **Deck/cube manual import supports text and JSON only, not CSV** (Phase
+  4): those two formats carry `section`/`category`/`tags` losslessly (see
+  IMPORT_FORMATS.md); doing the same for CSV would mean adding those as
+  mappable columns to the generic-CSV column-mapping UI for a format
+  (spreadsheet-shaped deck exports) that's less common than text or JSON
+  decklists in practice. Deferred to Phase 5 rather than shipped without
+  section/category support, which would silently lose data on import.
+- **Text-list section headers persist across lines, not just the one line
+  they're on** (Phase 4, `app/parsers/list_text.py`): a `Sideboard:` header
+  followed by five card lines puts all five in the sideboard, not just an
+  implicit "next line only" rule — matching how real decklist exports
+  (Moxfield, Archidekt, MTGO) write multi-card sections, and matching
+  IMPORT_FORMATS.md's own worked example (mainboard cards first, unheaded;
+  special sections after). A quantity prefix is optional (defaults to 1),
+  since the spec's own commander line (`Commander: Atraxa, Praetors'
+  Voice`) has none.
+- **Only `mainboard`/`commander`/`companion` sections count as "required"
+  for list buildability/shopping-list purposes** (Phase 4,
+  `app/services/comparison_service.py` `REQUIRED_LIST_SECTIONS`) —
+  `sideboard`/`maybeboard`/`considering` are informational. README.md scopes
+  CardForge around Commander decks and cubes, which don't have a
+  constructed-format-style required sideboard.
+- **A multi-list shopping list runs one `compare()` call over every list's
+  combined requirements against one shared owned pool, not N independent
+  per-list comparisons summed together** (Phase 4,
+  `comparison_service.run_shopping_list`): summing independent "do you own
+  this" answers would double-count a card two decks both want if you own
+  only one copy. Feeding all requirements into a single call lets the
+  engine's owned-pool decrement (`app/comparison/engine.py`) correctly
+  award that one copy to only one of the two requirements.
+- **"Interactive tables" means a small local `useSort` hook, not a table
+  library** (Phase 4, `frontend/src/hooks/useSort.ts`) — consistent with the
+  Phase 1 decision against a component framework; client-side sort over the
+  row counts this app deals with (hundreds, not virtualized-grid territory)
+  doesn't need one.
+- **Card name display language: per-item by default, forceable to one
+  language in Settings** (added during Phase 4, user-requested — see
+  `app/services/display_name_service.py`): each collection/list item shows
+  the card name in whatever language its own import data recorded (e.g.
+  ManaBox's "Language" column) — not the language CardForge cross-verified
+  against Scryfall (see the ManaBox `Language`-column reliability issue
+  found during Phase 3 testing: that column was wrong for the large
+  majority of a real test collection, but the user's ask here is
+  specifically to trust it anyway for display, independent of whatever the
+  "true" print language provably is). `UserSettings.card_name_language`
+  (`null`/`"de"`/`"en"`) overrides that per-item default for every card at
+  once when set. Either way, a card without a mirrored localized name for
+  the target language falls back to its canonical English name — never a
+  blank or an error.
+- **Switched the Scryfall bulk mirror from `default_cards` to `all_cards`**
+  to make the above possible: `default_cards` (Phase 3's original choice,
+  see that phase's decisions above) omits a card's non-English printings
+  entirely whenever an English printing of the same card exists, which left
+  `printed_name` populated for only a handful of cards printed in just one
+  non-English language. `all_cards` includes every language as its own row.
+  Confirmed cost: real sync against api.scryfall.com went from ~110k rows/
+  ~77MB/~20s (`default_cards`) to substantially more — see CLAUDE.md status
+  for the actual numbers from the last real sync.
 
 ## Backend module boundaries
 

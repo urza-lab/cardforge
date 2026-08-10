@@ -56,18 +56,20 @@ def _clean_db():
     try:
         db.execute(text("DELETE FROM imports"))
         db.execute(text("DELETE FROM collections"))
+        db.execute(text("DELETE FROM list_imports"))
+        db.execute(text("DELETE FROM card_lists"))
         db.execute(text("DELETE FROM scryfall_cards"))
         db.execute(
             text(
-                "UPDATE scryfall_sync_state SET status = 'NOT_STARTED', bulk_data_type = 'default_cards', "
+                "UPDATE scryfall_sync_state SET status = 'NOT_STARTED', bulk_data_type = 'all_cards', "
                 "source_updated_at = NULL, started_at = NULL, finished_at = NULL, card_count = 0, "
                 "error_message = NULL WHERE id = 1"
             )
         )
         db.execute(
             text(
-                "UPDATE user_settings SET default_comparison_mode = 'oracle', preferred_currency = 'USD' "
-                "WHERE user_id = 1"
+                "UPDATE user_settings SET default_comparison_mode = 'oracle', preferred_currency = 'USD', "
+                "card_name_language = NULL WHERE user_id = 1"
             )
         )
         db.commit()

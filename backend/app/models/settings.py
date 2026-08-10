@@ -28,6 +28,11 @@ class UserSettings(Base):
     # are Phase 6) - stored now so the setting exists in one place from the
     # start rather than being bolted on later.
     preferred_currency: Mapped[str] = mapped_column(String(8), default=DEFAULT_PREFERRED_CURRENCY)
+    # None = "auto": display each card in whatever language its own import
+    # data says (see app.services.display_name_service). "de"/"en" forces
+    # every card name to that language regardless of the item's own language,
+    # falling back to the English name where no localized name is mirrored.
+    card_name_language: Mapped[str | None] = mapped_column(String(8))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
