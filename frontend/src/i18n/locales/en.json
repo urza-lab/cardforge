@@ -232,6 +232,24 @@
     "cardNameLanguages": { "de": "German", "en": "English" },
     "cardNameLanguageHint": "By default, each card's name is shown in the language recorded for it on import. Forcing a language here shows every card in that language where a localized name is available, falling back to English otherwise."
   },
+  "dashboardPage": {
+    "collection": "Collection",
+    "resolvedCount": "Resolved against Scryfall",
+    "lists": "Decks & cubes",
+    "listCount": "Total lists",
+    "fullyBuildable": "Fully buildable",
+    "averageCoverage": "Average coverage",
+    "buildable": "Buildable",
+    "noLists": "No decks or cubes yet — see Decks & Cubes.",
+    "sources": "Source data",
+    "leverage": {
+      "title": "What to buy next",
+      "hint": "Ranked by how much buying each card would improve buildability across every deck/cube — see PRICING.md \"collection leverage\".",
+      "quantityNeeded": "Copies needed",
+      "listsNewlyBuildable": "Lists newly buildable",
+      "coverageGain": "Total coverage gain"
+    }
+  },
   "common": {
     "loading": "Loading…",
     "error": "Something went wrong",

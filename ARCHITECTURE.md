@@ -441,6 +441,52 @@ be decided without blocking implementation. All are changeable later.
   against) with no batch-pricing endpoint built. Shipping a feature that's
   slow or unbounded at real data scale is worse than not shipping it yet —
   see PRICING.md "Frontend".
+- **Collection leverage lives in `app/comparison/leverage.py`, as a pure
+  function extending `compare()`, not a DB-touching service** (Phase 7):
+  "which purchase unlocks the most buildability" is answered by literally
+  simulating ownership of each candidate card and re-running the existing
+  pure `compare()` per list — reusing the same engine rather than inventing
+  a parallel scoring model keeps the two mathematically consistent by
+  construction (a card's leverage can never disagree with what a real
+  comparison would show once bought). `app/metrics/dashboard_service.py`
+  is the DB-touching orchestration layer that loads owned/required cards
+  and calls it — same split as `app.services.comparison_service` versus
+  the pure engine it calls.
+- **The leverage metric is "lists newly fully buildable, then total
+  coverage-percent gain," not price-aware on its own** (Phase 7): a card
+  that single-handedly completes two decks ranks above one that nudges
+  five decks' coverage a little, matching what a collector actually cares
+  about ("what should I buy to finish a deck") more directly than a raw
+  coverage-sum would. Not batched — one `compare()` call per (candidate,
+  list) pair — which is fine at a self-hosted single-user tool's real
+  scale (dozens of missing cards × a handful of lists) but would need
+  real optimization work before it could handle hundreds of either.
+- **The dashboard is one aggregate endpoint (`GET /api/dashboard`), not
+  several the frontend assembles itself** (Phase 7,
+  `app/metrics/dashboard_service.py`): collection stats, per-list
+  buildability, sync status, and the leverage ranking all come from one
+  response so the Dashboard page fires one request, not five-plus.
+- **`/metrics` has no `/api` prefix and no auth** (Phase 7,
+  `app/api/metrics.py`): Prometheus's own scrape-path convention is a bare
+  `/metrics`, and `prometheus/prometheus.yml` is already written assuming
+  that; it's also never exposed outside the Docker network in the shipped
+  compose file (Prometheus reaches it at `backend:8000` directly, not
+  through the nginx-fronted `:666` the rest of the app uses), so it
+  doesn't need the same access story as the actual API. Values are
+  computed fresh from the same tables `dashboard_service` reads on every
+  scrape (a pull-based exporter, not counters incremented during request
+  handling) — see PRICING.md-style "no fake success": nothing here is
+  hardcoded or estimated.
+- **Grafana/Prometheus data directories needed the same root-owned-
+  bind-mount fix as `./data/secrets`/`./data/scryfall_cache`** (Phase 7,
+  `backend/scripts/init_secrets.py`): `prom/prometheus` runs as a fixed
+  65534:65534, `grafana/grafana-oss` as 472:0 — Docker still auto-creates
+  `./data/prometheus`/`./data/grafana` as root on first start regardless of
+  which non-root user eventually needs to write there, so `secrets-init`
+  now chowns those too. `grafana_admin_password` specifically is owned by
+  grafana's own uid (472), not the shared 1000:1000 the backend/worker-
+  readable secrets use — see `SECRET_SPECS`' per-secret owner override,
+  since nothing but the grafana container itself ever reads that file.
 
 ## Backend module boundaries
 

@@ -42,7 +42,9 @@ services:
     # "cardforge" user (uid 1000) can't write into a root-owned directory.
     # init_secrets.py immediately chowns everything it touches to uid 1000
     # (see backend/scripts/init_secrets.py) so the non-root backend/worker
-    # containers can read/write them afterwards.
+    # containers can read/write them afterwards. Same problem, same fix for
+    # ./data/prometheus (prom/prometheus runs as 65534:65534) and
+    # ./data/grafana (grafana/grafana-oss runs as 472:0) - Phase 7.
     user: "0:0"
     entrypoint: ["python", "scripts/init_secrets.py"]
     environment:
@@ -52,9 +54,13 @@ services:
       GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
       CARDFORGE_SECRETS_DIR: /data/secrets
       CARDFORGE_SCRYFALL_CACHE_DIR: /data/scryfall_cache
+      CARDFORGE_PROMETHEUS_DATA_DIR: /data/prometheus
+      CARDFORGE_GRAFANA_DATA_DIR: /data/grafana
     volumes:
       - ${CARDFORGE_DATA_DIR:-./data}/secrets:/data/secrets
       - ${CARDFORGE_DATA_DIR:-./data}/scryfall_cache:/data/scryfall_cache
+      - ${CARDFORGE_DATA_DIR:-./data}/prometheus:/data/prometheus
+      - ${CARDFORGE_DATA_DIR:-./data}/grafana:/data/grafana
     restart: "no"
 
   postgres:
@@ -154,6 +160,9 @@ services:
     image: prom/prometheus:v3.1.0
     container_name: cardforge-prometheus
     profiles: ["observability"]
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ${CARDFORGE_DATA_DIR:-./data}/prometheus:/prometheus

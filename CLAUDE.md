@@ -4,7 +4,7 @@ Context for Claude Code picking up this project. See `README.md` for the
 product description and `ARCHITECTURE.md` for the full phase plan and
 documented design decisions — read both before making changes.
 
-## Status (updated after Phase 6)
+## Status (updated after Phase 7 — the full 7-phase plan is now complete)
 
 Phase 1 (Docker Compose skeleton, persistent secrets, FastAPI healthcheck,
 React/TS shell) is **complete and verified working end-to-end** on a
@@ -121,6 +121,44 @@ serving correctly and containing the new strings/routes through the real
 nginx proxy — not via an actual browser click-through, since no
 browser-automation tool was available in this session either.
 
+Phase 7 (native dashboard, Grafana + Prometheus, collection leverage,
+backup docs) is **complete and verified end-to-end against real data**:
+`GET /api/dashboard` was checked against the real 2,653-item collection
+(distinct items/quantity/resolved count all correct) and against a real
+Moxfield-imported deck (92 cards, 16% coverage, ranked collection-leverage
+candidates matched hand-checked expectations — e.g. the 4 missing Forests
+ranked above single-copy cards). The Prometheus exporter
+(`GET /metrics`, no fake/hardcoded values) was verified scraped by a real
+Prometheus container, and a real Grafana instance auto-provisioned the
+datasource and the 8-panel "CardForge Overview" dashboard from the
+`--profile observability` compose stack, confirmed via Grafana's own API
+(datasource + dashboard both present, panels queryable). `scripts/backup.sh`
+produced a real ~83MB dump of the live database (532,469 Scryfall
+printings, 592,966 price observations, 2,653 collection items) that
+restored cleanly into a disposable scratch database with identical row
+counts across every major table — verified without ever touching the real
+database with the restore path. Two real permission bugs
+(root-owned `./data/prometheus`/`./data/grafana`, and
+`grafana_admin_password` unreadable by grafana's own uid) were found and
+fixed via live `--profile observability` starts, not assumed — see
+gotcha #22. 262 backend tests pass (92% coverage); `ruff`, `mypy`, and the
+frontend `lint`/`typecheck`/`build` are all clean. As with Phases 5/6, the
+new frontend (Dashboard page) was verified via the built production bundle
+serving real API data through the nginx proxy, not an actual browser
+click-through — no browser-automation tool was available in this session.
+
+This session separately found and fixed a real, long-standing bug
+unrelated to Phase 7 itself: `ruff check .` had been failing in CI since
+the Phase 2 push (FastAPI's `Depends()` pattern trips ruff's B008 rule,
+and the repo never configured the standard exemption for it) — invisible
+locally the whole time because `backend/Dockerfile` never copied
+`pyproject.toml` into the image and `docker-compose.dev.yml` never
+bind-mounted it either, so every local `ruff`/`mypy`/`pytest` run (in this
+session and, it turns out, in every prior one) was silently running with
+each tool's bare defaults instead of this repo's actual config. Fixed
+separately from Phase 7 (commit `5a23da6`) — see gotcha #17 and
+ARCHITECTURE.md.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key
@@ -128,15 +166,20 @@ The LXC has its own push access — SSH deploy key
 remote set to `git@github.com:urza-lab/cardforge.git`. No separate `gh` CLI
 install on the LXC.
 
-**Next up: Phase 7** (native dashboard, Grafana + Prometheus, collection
-leverage, backup docs). See `ARCHITECTURE.md` for the full 7-phase plan and
-"Documented default decisions" for the choices made along the way
-(default-user bootstrap, `/collections/default`,
+**All 7 planned phases are now complete.** See `ARCHITECTURE.md` for the
+full phase plan and "Documented default decisions" for the choices made
+along the way (default-user bootstrap, `/collections/default`,
 enum-as-VARCHAR, import preview persistence, duplicate-import flagging, JSON
 collection import, the single denormalized `scryfall_cards` table,
 resolution matching priority, ad-hoc non-persisted comparisons, minimal
 `user_settings` table, the separate list-import pipeline, text-list section
-semantics, multi-list shopping-list pooling, the Phase 5/6 decisions above).
+semantics, multi-list shopping-list pooling, the Phase 5/6/7 decisions
+above). Real possible future work, none of it scheduled: a direct
+Cardmarket API adapter (PRICING.md), a batched pricing endpoint enabling
+collection/list-wide total valuation (PRICING.md), splitting the refresh
+system's coarse `FAILED` status into the finer-grained ones
+SOURCE_ADAPTERS.md originally sketched, and a price-per-dollar-aware
+variant of collection leverage (ARCHITECTURE.md).
 
 ## Environment
 
@@ -327,6 +370,34 @@ semantics, multi-list shopping-list pooling, the Phase 5/6 decisions above).
     threshold and always flushing the parent (cards) first. When two
     batches have a FK dependency between them, tie their flush cadence
     together — don't let each grow and flush independently.
+21. **`docker compose down` (no `--profile` flag) does not stop containers
+    started under a named profile, even though `down` normally tears down
+    "everything"** (found in Phase 7): `prometheus`/`grafana` were left
+    running (and holding the shared network open — `down` then failed with
+    "Network cardforge_default Resource is still in use") after a plain
+    `docker compose down`, because compose only resolves the *default*
+    profile set (none active) unless told otherwise, the same as `up`. Use
+    `docker compose --profile observability down` (matching whatever
+    `--profile` flag started them) to actually stop profile-gated services
+    — `down` isn't an exception to the profile-scoping rule `up` follows.
+22. **The optional observability stack (`--profile observability`) needed
+    the same root-owned-bind-mount treatment as `./data/secrets`/
+    `./data/scryfall_cache`, for two more directories and one more
+    secret** (Phase 7): `./data/prometheus` (prom/prometheus runs as fixed
+    uid 65534) and `./data/grafana` (grafana/grafana-oss runs as fixed uid
+    472, group 0) are both auto-created root-owned by Docker on first
+    start, same as ever — `secrets-init` now chowns both (see
+    `backend/scripts/init_secrets.py`). Separately, `grafana_admin_password`
+    itself (already 0600, already owned by uid 1000 for the
+    backend/worker-readable secrets) was unreadable by the grafana
+    container specifically, since grafana runs as uid 472, not 1000 — fixed
+    by adding a per-secret owner override (`SECRET_SPECS`' third tuple
+    element) so a secret only one *other*, non-cardforge service reads can
+    be owned by that service's own uid instead of the shared default.
+    Symptom both times was a container stuck `Restarting (1)` in `docker
+    compose ps` with a permission-denied line in its logs — treat that
+    combination as "check who owns the bind-mounted path vs. which uid the
+    image actually runs as" before assuming anything more exotic.
 
 ## Principles to keep enforcing in later phases
 

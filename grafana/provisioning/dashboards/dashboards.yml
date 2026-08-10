@@ -1,0 +1,16 @@
+# Auto-loads every dashboard JSON in grafana/dashboards/ (bind-mounted read
+# -only into /var/lib/grafana/dashboards, see docker-compose.yml) - drop a
+# new dashboard JSON there and it appears in Grafana on the next reload
+# (updateIntervalSeconds below), no UI import step needed.
+apiVersion: 1
+
+providers:
+  - name: CardForge
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

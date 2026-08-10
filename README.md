@@ -17,8 +17,8 @@ pricing and refresh step is deterministic and reproducible.
 - Tracks coverage %, estimated remaining cost, and the age of every piece of
   external data (card data, prices, decklists) so you always know how stale
   something is.
-- Surfaces popularity/rating/power/salt signals for decks and cubes, where a
-  source provides them.
+- A native dashboard shows collection/deck stats at a glance, plus an
+  optional real Grafana + Prometheus setup for deeper metrics history.
 
 ## Why no AI
 
@@ -30,9 +30,9 @@ from now. See the project's design principles in `ARCHITECTURE.md`.
 
 ## Status
 
-This repository is being built in phases (see `ARCHITECTURE.md` for the
-phase plan). **Phases 1–6 are complete**: the Docker Compose stack,
-persistent secrets, FastAPI health checks, and the React/TypeScript shell
+This repository was built in phases (see `ARCHITECTURE.md` for the full
+plan) — **all 7 phases are complete**: the Docker Compose stack, persistent
+secrets, FastAPI health checks, and the React/TypeScript shell
 (English/German UI) are up and testable; collection import — ManaBox CSV,
 generic CSV, text lists, and JSON, each with a preview/confirm/abort flow
 and per-row error reporting — is implemented end to end (see
@@ -50,8 +50,13 @@ Scryfall and MTGJSON — the latter also carries real Cardmarket EUR retail
 data) plus your own manual overrides feed configurable price profiles, and
 comparisons/shopping lists can be filtered by budget to see exactly what a
 fixed amount of money would buy toward completing a deck or cube — see
-`PRICING.md`. Later phases (a native dashboard, collection leverage
-ranking) land incrementally on top of this foundation.
+`PRICING.md`. A native Dashboard page shows collection/deck stats and a
+"what to buy next" collection-leverage ranking (which missing card would
+complete the most decks/cubes), and an optional Grafana + Prometheus stack
+(`docker compose --profile observability up -d`, off by default) reads
+real metrics from the backend's `/metrics` endpoint — see `ARCHITECTURE.md`
+"Documented default decisions" for how leverage is computed and what the
+exporter reports.
 
 ## Quick start
 

@@ -232,6 +232,24 @@
     "cardNameLanguages": { "de": "Deutsch", "en": "Englisch" },
     "cardNameLanguageHint": "Standardmäßig wird jede Karte in der beim Import erfassten Sprache angezeigt. Erzwingst du hier eine Sprache, werden alle Karten in dieser Sprache angezeigt, sofern ein lokalisierter Name vorhanden ist — sonst auf Englisch."
   },
+  "dashboardPage": {
+    "collection": "Sammlung",
+    "resolvedCount": "Gegen Scryfall aufgelöst",
+    "lists": "Decks & Cubes",
+    "listCount": "Listen gesamt",
+    "fullyBuildable": "Vollständig baubar",
+    "averageCoverage": "Durchschnittliche Abdeckung",
+    "buildable": "Baubar",
+    "noLists": "Noch keine Decks oder Cubes — siehe Decks & Cubes.",
+    "sources": "Quelldaten",
+    "leverage": {
+      "title": "Was als Nächstes kaufen",
+      "hint": "Sortiert danach, wie stark der Kauf jeder Karte die Baubarkeit über alle Decks/Cubes hinweg verbessern würde — siehe PRICING.md \"collection leverage\".",
+      "quantityNeeded": "Benötigte Exemplare",
+      "listsNewlyBuildable": "Neu baubare Listen",
+      "coverageGain": "Gesamter Abdeckungsgewinn"
+    }
+  },
   "common": {
     "loading": "Lädt…",
     "error": "Es ist ein Fehler aufgetreten",

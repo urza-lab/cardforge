@@ -1,5 +1,12 @@
 # BACKUP_RESTORE
 
+**Verified (Phase 7):** `scripts/backup.sh` was run against the real running
+stack and produced a real ~83MB dump (532,469 Scryfall printings, 592,966
+price observations, 2,653 collection items); restoring that dump into a
+disposable scratch database (never the real `cardforge` one) reproduced
+identical row counts across every major table, confirming the dump/restore
+mechanism itself round-trips correctly.
+
 ## What needs backing up
 
 CardForge state lives entirely under `${CARDFORGE_DATA_DIR}` (default
@@ -13,6 +20,7 @@ CardForge state lives entirely under `${CARDFORGE_DATA_DIR}` (default
 | `./data/scryfall_cache` | Downloaded Scryfall bulk data | Low (re-downloadable) |
 | `./data/redis` | Job queue state only, safely disposable | Low |
 | `./data/grafana` | Grafana's own settings (only if the `observability` profile is used) | Low |
+| `./data/prometheus` | Prometheus's own time-series data (only if the `observability` profile is used) — every value it holds is re-derived from `/metrics` on the next scrape anyway, so this is purely a "keep dashboard history" backup, not a "recover state" one | Low |
 
 **`./data/postgres` and `./data/secrets` must be backed up together.** A
 Postgres dump alone is not enough — restoring it against a fresh

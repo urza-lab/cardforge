@@ -1,0 +1,14 @@
+# Auto-provisions Prometheus as Grafana's datasource (Phase 7) - both
+# services only ever start together via the `observability` compose
+# profile, so `prometheus:9090` (the compose service name) is always
+# resolvable on the shared network when this file is read.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
