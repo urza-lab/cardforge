@@ -44,6 +44,13 @@ class MissingCard:
     required_quantity: int
     owned_quantity: int
     missing_quantity: int
+    # Passed through from the RequiredCard that produced this shortfall,
+    # regardless of mode - in printing mode it's the exact printing that was
+    # actually unmet; in oracle mode it's whichever printing the requirement
+    # happened to resolve to, useful as a starting point for pricing (Phase
+    # 6, app/pricing/budget.py) even though oracle-mode matching itself
+    # doesn't key on it.
+    scryfall_card_id: str | None = None
 
 
 @dataclass(frozen=True)

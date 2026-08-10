@@ -91,9 +91,14 @@ form, and never solves/bypasses a CAPTCHA.
 
 Collection data, decklists, and price observations are personal/private by
 nature. Nothing in CardForge phones home; the only outbound network calls
-are the ones you explicitly enable per source (Scryfall, MTGJSON, Moxfield,
-Archidekt, Cardmarket) and each can be disabled independently in
-**Sources**.
+are the ones you explicitly trigger per source — the Scryfall bulk sync,
+the MTGJSON price sync (which also carries real Cardmarket-sourced EUR
+retail data — see PRICING.md, there is no separate direct Cardmarket
+connection), and Moxfield/Archidekt fetches triggered by importing or
+refreshing a specific deck URL. There is no per-source enable/disable
+toggle in the UI yet (the Sources page lists URL-sourced lists and their
+refresh status only, see SOURCE_ADAPTERS.md) — not calling a source is
+currently a matter of not triggering its sync/import, not a saved setting.
 
 ## Reporting a vulnerability
 

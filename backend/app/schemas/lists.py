@@ -5,7 +5,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.comparison.types import ComparisonResult
+from app.pricing.budget import BudgetResult, PricedMissingCard
 from app.schemas.comparison import MissingCardRead
+from app.schemas.pricing import BudgetResultRead, PricedMissingCardRead
 
 
 class CardListCreate(BaseModel):
@@ -107,3 +110,45 @@ class ListComparisonResponse(BaseModel):
     coverage_percent: float
     is_fully_buildable: bool
     missing: list[MissingCardRead]
+    # Both null unless a price_profile_id query param was passed (pricing
+    # every missing card costs extra DB round-trips - see
+    # pricing_service.resolve_cheapest_price_for_oracle - so it's opt-in,
+    # not computed on every comparison call). `budget` is additionally null
+    # if a price_profile_id was given but no budget cap was.
+    priced_missing: list[PricedMissingCardRead] | None = None
+    budget: BudgetResultRead | None = None
+
+    @classmethod
+    def from_result(
+        cls,
+        result: ComparisonResult,
+        priced_missing: list[PricedMissingCard] | None = None,
+        budget: BudgetResult | None = None,
+    ) -> ListComparisonResponse:
+        """Shared by GET /api/lists/{id}/comparison and GET
+        /api/shopping-list - both compute a plain ComparisonResult, then
+        optionally enrich it with pricing (see
+        app.services.pricing_service.price_and_budget_missing_cards).
+        """
+        return cls(
+            mode=result.mode,
+            total_required_cards=result.total_required_cards,
+            total_required_quantity=result.total_required_quantity,
+            total_owned_quantity=result.total_owned_quantity,
+            coverage_percent=result.coverage_percent,
+            is_fully_buildable=result.is_fully_buildable,
+            missing=[
+                MissingCardRead(
+                    name=m.name,
+                    oracle_id=m.oracle_id,
+                    required_quantity=m.required_quantity,
+                    owned_quantity=m.owned_quantity,
+                    missing_quantity=m.missing_quantity,
+                )
+                for m in result.missing
+            ],
+            priced_missing=[PricedMissingCardRead.model_validate(p) for p in priced_missing]
+            if priced_missing is not None
+            else None,
+            budget=BudgetResultRead.model_validate(budget) if budget is not None else None,
+        )

@@ -58,7 +58,17 @@ def _clean_db():
         db.execute(text("DELETE FROM collections"))
         db.execute(text("DELETE FROM list_imports"))
         db.execute(text("DELETE FROM card_lists"))
+        db.execute(text("DELETE FROM price_profiles"))
+        # price_observations isn't listed separately - it cascades away with
+        # scryfall_cards below regardless of provider (manual/mtgjson rows
+        # included), same as collection/list items' resolved_scryfall_card_id.
         db.execute(text("DELETE FROM scryfall_cards"))
+        db.execute(
+            text(
+                "UPDATE price_sync_state SET status = 'NOT_STARTED', started_at = NULL, finished_at = NULL, "
+                "price_count = 0, error_message = NULL WHERE provider = 'mtgjson'"
+            )
+        )
         db.execute(
             text(
                 "UPDATE scryfall_sync_state SET status = 'NOT_STARTED', bulk_data_type = 'all_cards', "

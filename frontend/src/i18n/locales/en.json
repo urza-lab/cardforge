@@ -164,12 +164,63 @@
       "STALE": "Stale",
       "FAILED": "Refresh failed",
       "AUTH_REQUIRED": "Login required"
+    },
+    "pricing": {
+      "profile": "Price profile",
+      "none": "No pricing",
+      "budget": "Budget (optional)",
+      "budgetPlaceholder": "e.g. 100",
+      "apply": "Apply pricing",
+      "unitPrice": "Unit price",
+      "noPrice": "No price available",
+      "budgetResultTitle": "Budget breakdown",
+      "budgetFullyCovered": "Every missing card fits within this budget.",
+      "budgetNotFullyCovered": "This budget doesn't cover everything missing — see below.",
+      "totalSpent": "Spent",
+      "remainingBudget": "Remaining",
+      "unpriced": "Unpriced cards",
+      "affordable": "Affordable / missing",
+      "lineTotal": "Line total"
     }
   },
   "sourcesPage": {
     "intro": "Decks and cubes imported from a public Moxfield or Archidekt URL. Each stays linked to its source and can be refreshed to pick up changes made there.",
     "empty": "No lists have been imported from a URL yet — see Import Lists.",
     "columns": { "provider": "Source", "status": "Status" }
+  },
+  "pricesPage": {
+    "mtgjson": {
+      "title": "MTGJSON price data",
+      "status": {
+        "NOT_STARTED": "Not synced yet",
+        "FETCHING": "Syncing…",
+        "CURRENT": "Up to date",
+        "FAILED": "Sync failed"
+      },
+      "priceCount": "Prices cached",
+      "syncNow": "Sync now",
+      "syncing": "Syncing…"
+    },
+    "providers": {
+      "manual": "Manual",
+      "mtgjson": "MTGJSON",
+      "scryfall": "Scryfall"
+    },
+    "profiles": {
+      "title": "Price profiles",
+      "columns": { "name": "Name", "currency": "Currency", "providers": "Providers (priority order)", "default": "Default" },
+      "makeDefault": "Make default",
+      "delete": "Delete",
+      "create": "Create profile"
+    },
+    "manual": {
+      "title": "Manual price override",
+      "hint": "Set your own price for a specific printing (by Scryfall printing ID) - takes priority in any profile that includes \"Manual\".",
+      "scryfallId": "Scryfall printing ID",
+      "price": "Price",
+      "save": "Save price",
+      "manualSaved": "Saved."
+    }
   },
   "settingsPage": {
     "saved": "Saved.",

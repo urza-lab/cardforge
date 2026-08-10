@@ -2,8 +2,9 @@
 
 CardForge's source-adapter system is designed so every external source is
 optional and swappable, and manual import always works as a fallback.
-**Status: interface defined in Phase 1; Scryfall (Phase 3), Moxfield, and
-Archidekt (Phase 5) are done; MTGJSON/Cardmarket land in Phase 6.**
+**Status: interface defined in Phase 1; Scryfall (Phase 3); Moxfield and
+Archidekt (Phase 5); MTGJSON (Phase 6) are all done. No direct Cardmarket
+API adapter — see below.**
 
 **Scryfall (Phase 3, done):** implemented as `app/source_adapters/scryfall.py`
 — bulk-data download/parse/mirror into `scryfall_cards`, triggered
@@ -33,16 +34,33 @@ sweep — see `app/services/list_refresh_service.py` and
 `app/workers/run_worker.py`); a refresh replaces the list's items wholesale
 rather than diffing, and never touches the list if nothing changed.
 
+**MTGJSON (Phase 6, done):** implemented as `app/source_adapters/mtgjson.py`
+— a real price-data sync (`AllIdentifiers.json.xz` + `AllPricesToday.json`,
+see PRICING.md for the full join logic), its own `PriceSyncState`
+FETCHING/CURRENT/FAILED row (`POST /api/mtgjson/sync`,
+`GET /api/mtgjson/status`), run as its own RQ job on the same `pricing`
+queue Phase 6 reserved in `app/workers/run_worker.py`. Also doesn't
+implement the generic `SourceAdapter` protocol below — same reasoning as
+Scryfall's own sync (a bulk data-mirror sync doesn't need
+`validate_url`/`fetch_by_url`/`search`). **No direct Cardmarket API
+adapter was built**: Cardmarket's own API needs OAuth app
+registration/approval, real friction for a self-hosted hobby tool, and
+MTGJSON's `AllPricesToday.json` already relays real Cardmarket retail
+prices (EUR) without that — see PRICING.md and ARCHITECTURE.md "Documented
+default decisions". A direct adapter remains a real possible future
+addition if MTGJSON's relay ever proves insufficient.
+
 ## Adapter interface
 
 This was the original Phase 1 design for a shape every adapter would
-implement. In practice, none of the three adapters actually built so far
-(Scryfall, Moxfield, Archidekt) implement it as a literal `Protocol` —
-each's real shape turned out simpler than this aspirational one once there
-was a concrete adapter to build against (see each adapter's own note
-above). Kept here as the reference design in case a future adapter
-(MTGJSON, Cardmarket, Phase 6) actually needs the fuller shape (`search`,
-`rate_limit`, `health_check`) that Moxfield/Archidekt didn't:
+implement. In practice, none of the four adapters actually built so far
+(Scryfall, Moxfield, Archidekt, MTGJSON) implement it as a literal
+`Protocol` — each's real shape turned out simpler than this aspirational
+one once there was a concrete adapter to build against (see each adapter's
+own note above). Kept here as the reference design in case a future
+adapter (a direct Cardmarket API, say) actually needs the fuller shape
+(`search`, `rate_limit`, `health_check`) none of the four built so far
+did:
 
 ```python
 class SourceAdapter(Protocol):
@@ -70,8 +88,8 @@ class SourceAdapter(Protocol):
 | Moxfield public URL | public_url | 5, done | Deck URLs only, no login |
 | Archidekt public URL | public_url | 5, done | Deck URLs only, no login |
 | Deck/cube CSV upload | file | 5, done | See IMPORT_FORMATS.md "Deck/cube CSV" |
-| MTGJSON | api | 6 | Pricing data, where suitable data is available |
-| Cardmarket | api | 6 | Optional, off by default |
+| MTGJSON | api | 6, done | Price data — see PRICING.md |
+| Cardmarket (direct API) | api | not planned | MTGJSON already relays real Cardmarket EUR retail data — see PRICING.md |
 | Generic configurable source | api/public_url | not planned | No concrete need yet — not scheduled |
 
 ## Status values

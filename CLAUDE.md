@@ -4,7 +4,7 @@ Context for Claude Code picking up this project. See `README.md` for the
 product description and `ARCHITECTURE.md` for the full phase plan and
 documented design decisions — read both before making changes.
 
-## Status (updated after Phase 5)
+## Status (updated after Phase 6)
 
 Phase 1 (Docker Compose skeleton, persistent secrets, FastAPI healthcheck,
 React/TS shell) is **complete and verified working end-to-end** on a
@@ -89,6 +89,38 @@ state machine vs. computed staleness, wholesale item replacement on
 refresh, the catch-all failure handler, and the plain-thread staleness
 sweep instead of RQ's scheduler).
 
+Phase 6 (price cache, Scryfall/MTGJSON/manual price providers, price
+profiles, budget filter) is **complete and verified end-to-end against real
+data and real live third-party APIs**: a real MTGJSON price sync landed
+**298,285** real price observations (TCGplayer USD + Cardmarket EUR retail,
+joined from `AllIdentifiers.json.xz` + `AllPricesToday.json`) in under two
+minutes; a real Scryfall resync (triggered specifically to exercise the new
+piggybacked price extraction) landed **294,681** real Scryfall-sourced price
+observations alongside its normal 532,469-printing card mirror sync; the
+real 2,653-card collection was re-resolved to 100% exact
+(`POST /api/collections/{id}/resolve`) afterward, matching the same pattern
+established in Phase 4. A real Moxfield deck import (92 cards) and a real
+Archidekt deck import (17 cards) were both priced end-to-end
+(`GET /api/lists/{id}/comparison?price_profile_id=...`) with real resolved
+USD prices for every missing card, and a real `$50` budget filter
+correctly allocated `$48.54` cheapest-first across 80 missing cards. Two
+real data-integrity bugs were found and fixed via these live syncs, not
+caught by the unit/API test suite alone (see gotchas #19 and #20) — both
+now also covered by regression tests. **No direct Cardmarket API adapter**
+was built (MTGJSON already relays real Cardmarket EUR retail data — see
+PRICING.md and ARCHITECTURE.md). A full `docker compose down && docker
+compose up -d --build` was verified to bring all six services back
+`Up`/`healthy` with the real collection and both real price syncs intact,
+followed by a fresh real Archidekt import + priced budget comparison
+against the newly-built (not just pre-restart) containers. 251 backend
+tests pass (91% coverage); `ruff`, `mypy`, and the frontend
+`lint`/`typecheck`/`build` are all clean. As with Phase 5's frontend work,
+the new UI (Prices page, price profile management, budget filter controls
+on the list comparison card) was verified via the built production bundle
+serving correctly and containing the new strings/routes through the real
+nginx proxy — not via an actual browser click-through, since no
+browser-automation tool was available in this session either.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key
@@ -96,15 +128,15 @@ The LXC has its own push access — SSH deploy key
 remote set to `git@github.com:urza-lab/cardforge.git`. No separate `gh` CLI
 install on the LXC.
 
-**Next up: Phase 6** (price cache, Scryfall/MTGJSON/Cardmarket(optional)/
-manual price providers, price profiles, budget filter). See `ARCHITECTURE.md`
-for the full 7-phase plan and "Documented default decisions" for the choices
-made along the way (default-user bootstrap, `/collections/default`,
+**Next up: Phase 7** (native dashboard, Grafana + Prometheus, collection
+leverage, backup docs). See `ARCHITECTURE.md` for the full 7-phase plan and
+"Documented default decisions" for the choices made along the way
+(default-user bootstrap, `/collections/default`,
 enum-as-VARCHAR, import preview persistence, duplicate-import flagging, JSON
 collection import, the single denormalized `scryfall_cards` table,
 resolution matching priority, ad-hoc non-persisted comparisons, minimal
 `user_settings` table, the separate list-import pipeline, text-list section
-semantics, multi-list shopping-list pooling, the Phase 5 decisions above).
+semantics, multi-list shopping-list pooling, the Phase 5/6 decisions above).
 
 ## Environment
 
@@ -253,6 +285,48 @@ semantics, multi-list shopping-list pooling, the Phase 5 decisions above).
     requirements-dev.txt` first, or just use `docker compose -f
     docker-compose.yml -f docker-compose.dev.yml` for the container you
     intend to run dev tooling against instead.
+18. **A long-running `worker` process caches old code in memory even with
+    the correct bind mount** (found repeatedly in Phase 6): unlike
+    `uvicorn --reload`'s file-watching restart, `python -m
+    app.workers.run_worker` has no hot-reload — Python's own module
+    caching (`sys.modules`) means a worker process that already imported
+    `app.workers.jobs`/`app.source_adapters.*` keeps using whatever was on
+    disk when *it* started, forever, regardless of later edits landing on
+    the (correctly mounted) host filesystem. `docker compose exec worker
+    python -c "import app.workers.jobs as m; print(hasattr(m, '...'))"`
+    is misleading here — it always shows `True` for a new function because
+    `exec` spawns a *fresh* process that imports fresh, while the actual
+    long-running worker still has the stale version. Symptom is the exact
+    same confusing `rq.utils.import_attribute` `AttributeError`/`ValueError:
+    Invalid attribute name` as gotcha #16's missing-mount case, but the fix
+    here is different: `docker compose restart worker` (a real process
+    restart, not `--force-recreate`, and not just checking the mount) after
+    *any* edit to code the worker executes, before triggering a job that
+    exercises it.
+19. **A `db.execute(delete(Parent))` inside a bulk-sync loop cascade-deletes
+    *every* child row referencing it, not just the ones that sync is about
+    to replace** (found in Phase 6 against real data: `run_bulk_sync`'s
+    full `scryfall_cards` wipe-then-reinsert was cascading away *all*
+    `price_observations` rows — manual and MTGJSON prices included, not
+    just Scryfall's own — every time someone re-synced the card mirror,
+    even though the same IDs get reinserted moments later in the same
+    transaction). If a child table's rows should survive a parent's
+    delete-and-reinsert cycle, snapshot the child rows you don't own before
+    the delete and restore them after, filtered to IDs that still exist in
+    the new data — see `app/source_adapters/scryfall.py` `run_bulk_sync`'s
+    `preserved_prices`/`restorable` handling and PRICING.md.
+20. **Two independent batch counters flushed on separate size thresholds
+    can flush out of dependency order** (found in Phase 6 against real
+    data, a `ForeignKeyViolation` on a real Scryfall sync): `run_bulk_sync`
+    accumulated `ScryfallCard` rows and their `PriceObservation` rows in
+    two separate lists, each flushed independently once *its own* list hit
+    `BATCH_SIZE` — since one card produces up to 4 price rows but only 1
+    card row, the price list reliably filled up (and flushed) before the
+    card list did, inserting price rows whose card wasn't in the database
+    yet. Fixed by triggering both flushes off `either` counter reaching the
+    threshold and always flushing the parent (cards) first. When two
+    batches have a FK dependency between them, tie their flush cadence
+    together — don't let each grow and flush independently.
 
 ## Principles to keep enforcing in later phases
 

@@ -13,6 +13,8 @@ from app.api.health import router as health_router
 from app.api.imports import router as imports_router
 from app.api.list_imports import router as list_imports_router
 from app.api.lists import router as lists_router
+from app.api.mtgjson import router as mtgjson_router
+from app.api.prices import router as prices_router
 from app.api.scryfall import router as scryfall_router
 from app.api.settings import router as settings_router
 from app.api.shopping_list import router as shopping_list_router
@@ -66,6 +68,8 @@ app.include_router(settings_router)
 app.include_router(lists_router)
 app.include_router(list_imports_router)
 app.include_router(shopping_list_router)
+app.include_router(mtgjson_router)
+app.include_router(prices_router)
 
 
 @app.get("/api")

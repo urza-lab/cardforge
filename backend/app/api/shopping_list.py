@@ -1,23 +1,30 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.schemas.comparison import MissingCardRead
 from app.schemas.lists import ListComparisonResponse
-from app.services import collection_service, comparison_service, list_service
+from app.services import collection_service, comparison_service, list_service, pricing_service
 
 router = APIRouter(prefix="/api/shopping-list", tags=["shopping-list"])
 
 
 @router.get("", response_model=ListComparisonResponse)
 def get_shopping_list(
-    list_ids: str, collection_id: int | None = None, mode: str = "oracle", db: Session = Depends(get_db)
+    list_ids: str,
+    collection_id: int | None = None,
+    mode: str = "oracle",
+    price_profile_id: int | None = None,
+    budget: Decimal | None = None,
+    db: Session = Depends(get_db),
 ) -> ListComparisonResponse:
     """Missing cards across several lists at once, compared against one
     shared owned pool (see comparison_service.run_shopping_list for why that
-    matters). `list_ids` is a comma-separated list of CardList ids.
+    matters). `list_ids` is a comma-separated list of CardList ids. Pricing
+    is opt-in via price_profile_id - see schemas.lists.ListComparisonResponse.
     """
     try:
         ids = [int(x) for x in list_ids.split(",") if x.strip()]
@@ -44,21 +51,11 @@ def get_shopping_list(
     except comparison_service.InvalidComparisonModeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return ListComparisonResponse(
-        mode=result.mode,
-        total_required_cards=result.total_required_cards,
-        total_required_quantity=result.total_required_quantity,
-        total_owned_quantity=result.total_owned_quantity,
-        coverage_percent=result.coverage_percent,
-        is_fully_buildable=result.is_fully_buildable,
-        missing=[
-            MissingCardRead(
-                name=m.name,
-                oracle_id=m.oracle_id,
-                required_quantity=m.required_quantity,
-                owned_quantity=m.owned_quantity,
-                missing_quantity=m.missing_quantity,
-            )
-            for m in result.missing
-        ],
-    )
+    try:
+        priced_missing, budget_result = pricing_service.price_and_budget_missing_cards(
+            db, result.missing, result.mode, price_profile_id=price_profile_id, budget=budget
+        )
+    except pricing_service.PriceProfileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="price profile not found") from exc
+
+    return ListComparisonResponse.from_result(result, priced_missing, budget_result)

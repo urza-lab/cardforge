@@ -164,12 +164,63 @@
       "STALE": "Veraltet",
       "FAILED": "Aktualisierung fehlgeschlagen",
       "AUTH_REQUIRED": "Login erforderlich"
+    },
+    "pricing": {
+      "profile": "Preisprofil",
+      "none": "Keine Preise",
+      "budget": "Budget (optional)",
+      "budgetPlaceholder": "z.B. 100",
+      "apply": "Preise anwenden",
+      "unitPrice": "Stückpreis",
+      "noPrice": "Kein Preis verfügbar",
+      "budgetResultTitle": "Budget-Aufschlüsselung",
+      "budgetFullyCovered": "Jede fehlende Karte passt in dieses Budget.",
+      "budgetNotFullyCovered": "Dieses Budget deckt nicht alles Fehlende ab — siehe unten.",
+      "totalSpent": "Ausgegeben",
+      "remainingBudget": "Verbleibend",
+      "unpriced": "Karten ohne Preis",
+      "affordable": "Leistbar / fehlend",
+      "lineTotal": "Zeilensumme"
     }
   },
   "sourcesPage": {
     "intro": "Decks und Cubes, die von einer öffentlichen Moxfield- oder Archidekt-URL importiert wurden. Jede bleibt mit ihrer Quelle verknüpft und kann aktualisiert werden, um dortige Änderungen zu übernehmen.",
     "empty": "Noch keine Liste von einer URL importiert — siehe Listen importieren.",
     "columns": { "provider": "Quelle", "status": "Status" }
+  },
+  "pricesPage": {
+    "mtgjson": {
+      "title": "MTGJSON-Preisdaten",
+      "status": {
+        "NOT_STARTED": "Noch nicht synchronisiert",
+        "FETCHING": "Synchronisiert…",
+        "CURRENT": "Aktuell",
+        "FAILED": "Synchronisierung fehlgeschlagen"
+      },
+      "priceCount": "Zwischengespeicherte Preise",
+      "syncNow": "Jetzt synchronisieren",
+      "syncing": "Synchronisiert…"
+    },
+    "providers": {
+      "manual": "Manuell",
+      "mtgjson": "MTGJSON",
+      "scryfall": "Scryfall"
+    },
+    "profiles": {
+      "title": "Preisprofile",
+      "columns": { "name": "Name", "currency": "Währung", "providers": "Quellen (Prioritätsreihenfolge)", "default": "Standard" },
+      "makeDefault": "Als Standard festlegen",
+      "delete": "Löschen",
+      "create": "Profil erstellen"
+    },
+    "manual": {
+      "title": "Manueller Preis-Override",
+      "hint": "Setze einen eigenen Preis für einen bestimmten Druck (per Scryfall-Druck-ID) - hat Vorrang in jedem Profil, das \"Manuell\" enthält.",
+      "scryfallId": "Scryfall-Druck-ID",
+      "price": "Preis",
+      "save": "Preis speichern",
+      "manualSaved": "Gespeichert."
+    }
   },
   "settingsPage": {
     "saved": "Gespeichert.",

@@ -29,7 +29,7 @@
 | 3 | Scryfall normalization, oracle/printing comparison modes, user settings |
 | 4 | Deck/cube data model + manual text/JSON import, detail pages, interactive tables, CSV exports, shopping list |
 | 5 | Moxfield/Archidekt public URL adapters, deck/cube CSV import, refresh system, scheduler, stale handling |
-| 6 | Price cache, Scryfall/MTGJSON/Cardmarket(optional)/manual providers, price profiles, budget filter |
+| 6 | Price cache, Scryfall/MTGJSON/manual providers, price profiles, budget filter (no direct Cardmarket API adapter — see "Documented default decisions") |
 | 7 | Native dashboard, Grafana + Prometheus, collection leverage, backup docs |
 
 Each phase is independently startable and testable; see the "Testing this
@@ -381,6 +381,66 @@ be decided without blocking implementation. All are changeable later.
   that sleeps and enqueues `check_stale_lists` every 6 hours is enough for
   a single-worker, single/few-user self-hosted tool, and dies cleanly with
   the process instead of leaving orphaned scheduled state in Redis.
+- **`price_observations` is a latest-value cache, not a price-history
+  table** (Phase 6, `app/models/pricing.py`) — same reasoning as the
+  refresh system's stored-status-vs-computed-staleness split above: nothing
+  today reads price *trends*, only "what does this cost right now," so
+  each provider's sync replaces its own rows wholesale rather than
+  appending to a growing series. See PRICING.md for the full design and the
+  two real data-integrity bugs this required fixing (see also CLAUDE.md
+  gotchas): MTGJSON uuids that alias to the same `scryfallId`, and a
+  Scryfall-resync price-extraction batch that could flush before its
+  corresponding card batch.
+- **Scryfall's own price data piggybacks the existing card-mirror sync;
+  MTGJSON gets its own separate sync job** (Phase 6): Scryfall's bulk
+  `all_cards` file already includes a `prices` object per card, so
+  extracting it costs nothing extra — no second download, no second
+  FETCHING/CURRENT/FAILED state machine needed (it shares
+  `ScryfallSyncState`). MTGJSON's price data lives in genuinely separate
+  files or with a genuinely different ID space, so it gets its own
+  `PriceSyncState` row/job/API (`POST /api/mtgjson/sync`) rather than being
+  forced into the Scryfall sync's shape.
+- **No direct Cardmarket API adapter** (Phase 6, despite
+  ARCHITECTURE.md/README.md/SOURCE_ADAPTERS.md all originally listing
+  Cardmarket as its own planned provider): Cardmarket's own API requires
+  OAuth app registration/approval, real friction for a self-hosted hobby
+  tool with no concrete need beyond "get some EUR prices." MTGJSON's
+  `AllPricesToday.json` already relays real Cardmarket retail prices
+  (sourced from Cardmarket itself) without that — see PRICING.md. A direct
+  Cardmarket adapter remains a real possible future addition if MTGJSON's
+  relay ever proves insufficient, not something ruled out permanently.
+- **Oracle-mode pricing resolves the *cheapest* printing sharing an
+  oracle_id, not a specific one** (Phase 6,
+  `pricing_service.resolve_cheapest_price_for_oracle`): this follows
+  oracle-mode comparison's own "any printing satisfies this" philosophy
+  (`app/comparison/engine.py`) through to pricing — the realistic cost of
+  closing an oracle-mode gap is whatever the cheapest legal printing costs,
+  not whichever printing an import happened to resolve to. Not batched (one
+  query per candidate printing) — acceptable at a self-hosted single-user
+  tool's scale (dozens of missing cards × single-digit printings each), not
+  something built for hundreds-of-oracle-groups-per-request scale that
+  doesn't exist here.
+- **The budget filter is a pure function over already-priced data
+  (`app/pricing/budget.py`), not folded into the comparison engine itself**
+  (Phase 6): keeps `app.comparison` free of any pricing concept (it stays a
+  pure library per this doc's design principles above) while still getting
+  the same "plain data in, plain data out" testability — `apply_budget`
+  takes a list of `PricedMissingCard` and a budget, returns an allocation,
+  nothing else. Greedy cheapest-first, not collection-leverage-aware
+  (that's Phase 7's "which purchases unlock the most buildability" — a
+  materially different, harder problem this doesn't attempt to solve yet).
+- **Pricing a comparison/shopping-list result is opt-in via a
+  `price_profile_id` query param, not computed automatically** (Phase 6,
+  `app/schemas/lists.py` `ListComparisonResponse.priced_missing`/`budget`):
+  pricing every missing card costs a real DB round trip per card (more for
+  oracle mode's cheapest-printing search) — a plain buildability check
+  that doesn't ask for pricing shouldn't pay for it.
+- **No collection/list-wide total valuation feature** (Phase 6, deferred):
+  would mean resolving a price for every item (thousands of round trips for
+  a large real collection, see the 2,653-item one this project develops
+  against) with no batch-pricing endpoint built. Shipping a feature that's
+  slow or unbounded at real data scale is worse than not shipping it yet —
+  see PRICING.md "Frontend".
 
 ## Backend module boundaries
 

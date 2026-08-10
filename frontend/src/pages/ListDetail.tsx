@@ -6,6 +6,7 @@ import { useSort } from "../hooks/useSort";
 import type { CardList, CardListItem, ListComparisonResponse } from "../types/lists";
 import type { ComparisonMode } from "../types/comparison";
 import type { UserSettings } from "../types/settings";
+import type { PriceProfile } from "../types/pricing";
 
 const REFRESH_POLL_INTERVAL_MS = 3000;
 
@@ -23,6 +24,12 @@ export default function ListDetail() {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  const [priceProfiles, setPriceProfiles] = useState<PriceProfile[] | null>(null);
+  const [priceProfileId, setPriceProfileId] = useState<string>("");
+  const [budgetInput, setBudgetInput] = useState<string>("");
+  const [pricingBusy, setPricingBusy] = useState(false);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+
   const fetchAll = useCallback(
     (comparisonMode: ComparisonMode) => {
       if (!id) return;
@@ -38,6 +45,34 @@ export default function ListDetail() {
     },
     [id],
   );
+
+  useEffect(() => {
+    apiGet<PriceProfile[]>("/price-profiles")
+      .then((profiles) => {
+        setPriceProfiles(profiles);
+        const defaultProfile = profiles.find((p) => p.is_default);
+        if (defaultProfile) setPriceProfileId(String(defaultProfile.id));
+      })
+      .catch(() => {
+        // Pricing stays opt-in and unavailable if this fails - not fatal to the page.
+      });
+  }, []);
+
+  async function handleApplyPricing() {
+    if (!id || !priceProfileId) return;
+    setPricingBusy(true);
+    setPricingError(null);
+    try {
+      const params = new URLSearchParams({ mode, price_profile_id: priceProfileId });
+      if (budgetInput.trim()) params.set("budget", budgetInput.trim());
+      const response = await apiGet<ListComparisonResponse>(`/lists/${id}/comparison?${params.toString()}`);
+      setComparison(response);
+    } catch (err) {
+      setPricingError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setPricingBusy(false);
+    }
+  }
 
   useEffect(() => {
     apiGet<UserSettings>("/settings")
@@ -191,6 +226,46 @@ export default function ListDetail() {
             </select>
           </div>
 
+          {priceProfiles && priceProfiles.length > 0 && (
+            <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
+              <div>
+                <label htmlFor="ld-price-profile" style={{ display: "block" }}>
+                  {t("listDetailPage.pricing.profile")}
+                </label>
+                <select
+                  id="ld-price-profile"
+                  className="cf-select"
+                  value={priceProfileId}
+                  onChange={(e) => setPriceProfileId(e.target.value)}
+                >
+                  <option value="">{t("listDetailPage.pricing.none")}</option>
+                  {priceProfiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.currency})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="ld-budget" style={{ display: "block" }}>
+                  {t("listDetailPage.pricing.budget")}
+                </label>
+                <input
+                  id="ld-budget"
+                  className="cf-input"
+                  style={{ width: 100 }}
+                  value={budgetInput}
+                  onChange={(e) => setBudgetInput(e.target.value)}
+                  placeholder={t("listDetailPage.pricing.budgetPlaceholder")}
+                />
+              </div>
+              <button className="cf-btn" disabled={pricingBusy || !priceProfileId} onClick={handleApplyPricing}>
+                {pricingBusy ? t("common.loading") : t("listDetailPage.pricing.apply")}
+              </button>
+            </div>
+          )}
+          {pricingError && <div className="cf-alert cf-alert-error">{pricingError}</div>}
+
           <div className={comparison.is_fully_buildable ? "cf-alert cf-alert-success" : "cf-alert cf-alert-warn"}>
             {comparison.is_fully_buildable
               ? t("comparisonsPage.buildable")
@@ -221,19 +296,87 @@ export default function ListDetail() {
                     <th>{t("comparisonsPage.columns.required")}</th>
                     <th>{t("comparisonsPage.columns.owned")}</th>
                     <th>{t("comparisonsPage.columns.missing")}</th>
+                    {comparison.priced_missing && <th>{t("listDetailPage.pricing.unitPrice")}</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {comparison.missing.map((m) => (
-                    <tr key={`${m.name}::${m.oracle_id ?? ""}`}>
-                      <td>{m.name}</td>
-                      <td>{m.required_quantity}</td>
-                      <td>{m.owned_quantity}</td>
-                      <td>{m.missing_quantity}</td>
-                    </tr>
-                  ))}
+                  {comparison.missing.map((m) => {
+                    const priced = comparison.priced_missing?.find((p) => p.name === m.name);
+                    return (
+                      <tr key={`${m.name}::${m.oracle_id ?? ""}`}>
+                        <td>{m.name}</td>
+                        <td>{m.required_quantity}</td>
+                        <td>{m.owned_quantity}</td>
+                        <td>{m.missing_quantity}</td>
+                        {comparison.priced_missing && (
+                          <td>
+                            {priced?.unit_price
+                              ? `${priced.unit_price} (${t(`pricesPage.providers.${priced.provider}`)})`
+                              : t("listDetailPage.pricing.noPrice")}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {comparison.budget && (
+            <div style={{ marginTop: 20 }}>
+              <h3>{t("listDetailPage.pricing.budgetResultTitle")}</h3>
+              <div
+                className={comparison.budget.fully_covered ? "cf-alert cf-alert-success" : "cf-alert cf-alert-warn"}
+              >
+                {comparison.budget.fully_covered
+                  ? t("listDetailPage.pricing.budgetFullyCovered")
+                  : t("listDetailPage.pricing.budgetNotFullyCovered")}
+              </div>
+              <div className="cf-stat-row">
+                <div className="cf-stat">
+                  <div className="cf-stat-value">
+                    {comparison.budget.total_spent} {comparison.budget.currency}
+                  </div>
+                  <div className="cf-stat-label">{t("listDetailPage.pricing.totalSpent")}</div>
+                </div>
+                <div className="cf-stat">
+                  <div className="cf-stat-value">
+                    {comparison.budget.remaining_budget} {comparison.budget.currency}
+                  </div>
+                  <div className="cf-stat-label">{t("listDetailPage.pricing.remainingBudget")}</div>
+                </div>
+                {comparison.budget.unpriced.length > 0 && (
+                  <div className="cf-stat">
+                    <div className="cf-stat-value">{comparison.budget.unpriced.length}</div>
+                    <div className="cf-stat-label">{t("listDetailPage.pricing.unpriced")}</div>
+                  </div>
+                )}
+              </div>
+              <div className="cf-table-wrap">
+                <table className="cf-table">
+                  <thead>
+                    <tr>
+                      <th>{t("comparisonsPage.columns.name")}</th>
+                      <th>{t("listDetailPage.pricing.unitPrice")}</th>
+                      <th>{t("listDetailPage.pricing.affordable")}</th>
+                      <th>{t("listDetailPage.pricing.lineTotal")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {comparison.budget.lines.map((line) => (
+                      <tr key={line.name} className={line.affordable_quantity < line.missing_quantity ? "cf-row-error" : undefined}>
+                        <td>{line.name}</td>
+                        <td>{line.unit_price}</td>
+                        <td>
+                          {line.affordable_quantity} / {line.missing_quantity}
+                        </td>
+                        <td>{line.line_total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

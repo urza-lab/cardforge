@@ -67,6 +67,7 @@ def compare(
                     required_quantity=required_card.quantity,
                     owned_quantity=available,
                     missing_quantity=shortfall,
+                    scryfall_card_id=required_card.scryfall_card_id,
                 )
             )
 

@@ -1,4 +1,5 @@
 import type { MissingCard } from "./comparison";
+import type { BudgetResult, PricedMissingCard } from "./pricing";
 
 export type ListType = "deck" | "cube";
 export type ListSection = "mainboard" | "commander" | "companion" | "sideboard" | "maybeboard" | "considering";
@@ -79,4 +80,6 @@ export interface ListComparisonResponse {
   coverage_percent: number;
   is_fully_buildable: boolean;
   missing: MissingCard[];
+  priced_missing: PricedMissingCard[] | null;
+  budget: BudgetResult | null;
 }

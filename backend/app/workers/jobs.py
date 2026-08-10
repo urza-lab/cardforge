@@ -9,6 +9,7 @@ import logging
 from app.core.database import get_sessionmaker
 from app.models.lists import CardList
 from app.services import list_refresh_service
+from app.source_adapters.mtgjson import run_price_sync
 from app.source_adapters.scryfall import run_bulk_sync
 
 log = logging.getLogger("cardforge.worker.jobs")
@@ -19,6 +20,15 @@ def sync_scryfall_bulk_data() -> None:
     db = session_local()
     try:
         run_bulk_sync(db)
+    finally:
+        db.close()
+
+
+def sync_mtgjson_prices() -> None:
+    session_local = get_sessionmaker()
+    db = session_local()
+    try:
+        run_price_sync(db)
     finally:
         db.close()
 

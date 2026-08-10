@@ -22,14 +22,16 @@ import json
 import logging
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, insert
+from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.models.pricing import PriceObservation, PriceProvider
 from app.models.scryfall import SYNC_STATE_ID, ScryfallCard, ScryfallSyncState, ScryfallSyncStatus
 
 log = logging.getLogger("cardforge.scryfall")
@@ -130,6 +132,36 @@ def _map_card(data: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+# Scryfall's own "prices" object has usd/usd_foil/usd_etched/eur/eur_foil/
+# eur_etched/tix keys - only the four most broadly useful ones are mirrored
+# (see PRICING.md); etched and MTGO "tix" are niche enough to skip rather
+# than add two more currencies/finishes nothing reads yet.
+_PRICE_FIELDS = (("usd", "USD", False), ("usd_foil", "USD", True), ("eur", "EUR", False), ("eur_foil", "EUR", True))
+
+
+def _map_prices(data: dict[str, Any]) -> list[dict[str, Any]]:
+    prices = data.get("prices") or {}
+    rows: list[dict[str, Any]] = []
+    for key, currency, foil in _PRICE_FIELDS:
+        raw_price = prices.get(key)
+        if raw_price is None:
+            continue
+        try:
+            price = Decimal(raw_price)
+        except InvalidOperation:
+            continue
+        rows.append(
+            {
+                "scryfall_card_id": data["id"],
+                "provider": PriceProvider.scryfall.value,
+                "currency": currency,
+                "foil": foil,
+                "price": price,
+            }
+        )
+    return rows
+
+
 def run_bulk_sync(db: Session, settings: Settings | None = None) -> ScryfallSyncState:
     """Download, parse, and replace the local scryfall_cards mirror.
 
@@ -139,6 +171,16 @@ def run_bulk_sync(db: Session, settings: Settings | None = None) -> ScryfallSync
     leaves the previous successful sync's data untouched (see
     ARCHITECTURE.md "no fake success": a sync that didn't finish must never
     look like it did, and must never wipe out data that did finish).
+
+    Also (Phase 6) extracts each card's own `prices` into
+    `price_observations` (provider="scryfall") in the same pass - no extra
+    download needed. `price_observations.scryfall_card_id` has `ON DELETE
+    CASCADE` to `scryfall_cards.id`, so the `delete(ScryfallCard)` below
+    would silently wipe *every* provider's prices (manual entries included)
+    even though the same IDs get reinserted moments later in this same
+    transaction - non-scryfall rows are snapshotted before the delete and
+    restored after, for any printing ID still present in the new data (see
+    PRICING.md).
     """
     settings = settings or get_settings()
     state = db.get(ScryfallSyncState, SYNC_STATE_ID)
@@ -155,20 +197,60 @@ def run_bulk_sync(db: Session, settings: Settings | None = None) -> ScryfallSync
         cache_path = Path(settings.scryfall_cache_dir) / "all_cards.jsonl.gz"
         download_bulk_file(manifest["jsonl_download_uri"], cache_path, settings)
 
+        preserved_prices = [
+            {
+                "scryfall_card_id": row.scryfall_card_id,
+                "provider": row.provider,
+                "currency": row.currency,
+                "foil": row.foil,
+                "price": row.price,
+            }
+            for row in db.scalars(
+                select(PriceObservation).where(PriceObservation.provider != PriceProvider.scryfall.value)
+            )
+        ]
+
         db.execute(delete(ScryfallCard))
+        seen_ids: set[str] = set()
         count = 0
         batch: list[dict[str, Any]] = []
+        price_batch: list[dict[str, Any]] = []
         for raw in iter_cards_from_file(cache_path):
             mapped = _map_card(raw)
             if mapped is None:
                 continue
+            seen_ids.add(mapped["id"])
             batch.append(mapped)
+            price_batch.extend(_map_prices(raw))
             count += 1
-            if len(batch) >= BATCH_SIZE:
+            # Flushed together, cards first - a price row's card must exist
+            # in the DB before that row can be inserted (FK). Each card
+            # contributes up to 4 price rows but only 1 card row, so
+            # price_batch reaches BATCH_SIZE well before batch does on its
+            # own; triggering off either one and always flushing batch
+            # first is what keeps every price insert's FK satisfied (a real
+            # ForeignKeyViolation this fixed, found against a real sync).
+            if len(batch) >= BATCH_SIZE or len(price_batch) >= BATCH_SIZE:
                 db.execute(insert(ScryfallCard), batch)
                 batch = []
+                if price_batch:
+                    db.execute(insert(PriceObservation), price_batch)
+                    price_batch = []
         if batch:
             db.execute(insert(ScryfallCard), batch)
+        if price_batch:
+            db.execute(insert(PriceObservation), price_batch)
+
+        restorable = [p for p in preserved_prices if p["scryfall_card_id"] in seen_ids]
+        if restorable:
+            db.execute(insert(PriceObservation), restorable)
+        dropped = len(preserved_prices) - len(restorable)
+        if dropped:
+            log.warning(
+                "scryfall bulk sync: dropped %d non-scryfall price observation(s) for printings no "
+                "longer in the mirror",
+                dropped,
+            )
 
         state.status = ScryfallSyncStatus.current.value
         state.bulk_data_type = BULK_DATA_TYPE

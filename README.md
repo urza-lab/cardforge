@@ -31,7 +31,7 @@ from now. See the project's design principles in `ARCHITECTURE.md`.
 ## Status
 
 This repository is being built in phases (see `ARCHITECTURE.md` for the
-phase plan). **Phases 1–5 are complete**: the Docker Compose stack,
+phase plan). **Phases 1–6 are complete**: the Docker Compose stack,
 persistent secrets, FastAPI health checks, and the React/TypeScript shell
 (English/German UI) are up and testable; collection import — ManaBox CSV,
 generic CSV, text lists, and JSON, each with a preview/confirm/abort flow
@@ -45,8 +45,13 @@ background staleness sweep) to re-sync a URL-sourced list against changes
 made at the source. Detail pages show a live buildability comparison, CSV
 export, and a cross-list shopping list. Each card's name displays in
 whatever language your import recorded for it by default, or a single
-forced language (German/English) from Settings. Later phases (pricing,
-budget filter, dashboards) land incrementally on top of this foundation.
+forced language (German/English) from Settings. Real market prices (from
+Scryfall and MTGJSON — the latter also carries real Cardmarket EUR retail
+data) plus your own manual overrides feed configurable price profiles, and
+comparisons/shopping lists can be filtered by budget to see exactly what a
+fixed amount of money would buy toward completing a deck or cube — see
+`PRICING.md`. Later phases (a native dashboard, collection leverage
+ranking) land incrementally on top of this foundation.
 
 ## Quick start
 
@@ -68,6 +73,7 @@ docker compose up -d --build
 | `SECURITY.md` | Auth model, persistent secrets, SSRF protections |
 | `SOURCE_ADAPTERS.md` | How Scryfall/MTGJSON/Moxfield/Archidekt adapters work |
 | `IMPORT_FORMATS.md` | ManaBox CSV, generic CSV, text list, JSON import formats |
+| `PRICING.md` | Price cache, providers, price profiles, budget filter |
 | `BACKUP_RESTORE.md` | Backing up and restoring Postgres + secrets |
 
 ## License
