@@ -178,15 +178,15 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
-      # A GF_SERVER_ROOT_URL of ".../grafana/" + GF_SERVER_SERVE_FROM_SUB_PATH
-      # used to be set here for a future nginx "/grafana/" reverse-proxy path
-      # that was never actually built (frontend/nginx.conf has no such
-      # location) - found while wiring the Grafana embed feature below: with
-      # serve_from_sub_path on, Grafana 301-redirects every direct request
-      # (e.g. the one this app's iframe needs) to that nonexistent sub-path,
-      # which then 404s. Removed - Grafana is only ever reached directly on
-      # its own GRAFANA_HOST_PORT, not proxied, so it needs Grafana's own
-      # defaults here, not a sub-path config for a proxy that doesn't exist.
+      # Re-added (this time with a matching frontend/nginx.conf "/grafana/"
+      # location that actually exists) so the Dashboard page's embedded
+      # panel can reach Grafana through this app's own origin instead of a
+      # separate host:port the browser has to be able to reach directly -
+      # see CLAUDE.md gotcha #24 for the earlier, broken attempt at this
+      # (these two settings without the matching nginx location) and
+      # ARCHITECTURE.md for the current, working version.
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
       # Needed for the CardForge Dashboard page to iframe-embed a Grafana
       # "Public Dashboard" panel (see ARCHITECTURE.md) - Grafana denies all
       # framing by default (X-Frame-Options: deny) regardless of the public-

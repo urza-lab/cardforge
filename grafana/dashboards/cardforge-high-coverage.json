@@ -98,6 +98,51 @@
         ]
       },
       "options": { "showHeader": true, "cellHeight": "sm" }
+    },
+    {
+      "id": 2,
+      "type": "xychart",
+      "title": "Coverage vs. cost to complete",
+      "description": "Each point is one deck/cube: how close it already is to buildable (x) against the real market cost of everything still missing (y, default price profile - see PRICING.md). The bottom-right corner (high coverage, low cost) is the best bang-for-buck to finish next. A deck is only plotted once every missing card actually resolved a price - see cardforge_list_missing_cost's own doc string for why a partial total is omitted rather than shown too low.",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "cardforge_list_coverage_percent", "instant": true, "format": "table", "refId": "A" },
+        { "expr": "cardforge_list_missing_cost", "instant": true, "format": "table", "refId": "B" }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": { "byField": "list_id", "mode": "outer" }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time 1": true, "Time 2": true, "__name__ 1": true, "__name__ 2": true,
+              "instance 1": true, "instance 2": true, "job 1": true, "job 2": true,
+              "list_name 2": true, "list_type 2": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "list_name 1": "Deck / Cube", "list_type 1": "Type",
+              "Value #A": "Coverage %", "Value #B": "Missing Cost", "currency": "Currency"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "pointSize": { "fixed": 8 } } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Coverage %" }, "properties": [{ "id": "unit", "value": "percent" }, { "id": "min", "value": 0 }, { "id": "max", "value": 100 }] },
+          { "matcher": { "id": "byName", "options": "Missing Cost" }, "properties": [{ "id": "unit", "value": "currencyUSD" }] }
+        ]
+      },
+      "options": {
+        "seriesMapping": "auto",
+        "tooltip": { "mode": "single" },
+        "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }
+      }
     }
   ]
 }

@@ -102,7 +102,7 @@ export default function Settings() {
               className="cf-input"
               value={settings.grafana_embed_url ?? ""}
               disabled={busy}
-              placeholder="http://<host>:3000/public-dashboards/..."
+              placeholder="/grafana/public-dashboards/..."
               onChange={(e) => setSettings({ ...settings, grafana_embed_url: e.target.value })}
               onBlur={(e) => save({ grafana_embed_url: e.target.value.trim() || null })}
             />

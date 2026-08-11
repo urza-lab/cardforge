@@ -70,6 +70,7 @@ export interface ListImportSummary {
 export interface ListImportPreview extends ListImportSummary {
   rows: ListImportRow[];
   is_likely_duplicate: boolean;
+  deck_name: string | null;
 }
 
 export interface ListComparisonResponse {

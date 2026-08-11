@@ -248,6 +248,30 @@ saved through `PUT /api/settings` exactly as the Settings page would. 294
 backend tests pass; `ruff`, `mypy`, and the frontend `lint`/`build` are all
 clean.
 
+**Post-launch fixes and follow-ups, user-requested after using the app for
+real.** A real production outage (site-wide 502s) led to gotcha #26 (nginx
+caching a stale backend IP) and its own fix/commit. Separately, five more
+small user-requested items landed together: (1) the Grafana embed URL was
+made same-origin (`/grafana/...` through a new nginx proxy location)
+instead of needing a separate host:port, after the user asked whether it
+could "stay on the docker network" — see gotcha #24's sequel in
+ARCHITECTURE.md; (2) a second Grafana panel (real scatter plot: coverage %
+vs. real cost-to-complete) was added after the user asked whether reliable
+price data existed to back it (yes — Phase 6's real MTGJSON/Scryfall sync
+data) — building this caught and fixed a real, non-hypothetical performance
+bug (gotcha #27) before it shipped, not after; (3) a `PATCH /api/lists/
+{id}` rename endpoint was added, and `deck_name` (previously fetched and
+silently discarded on every Moxfield/Archidekt URL import) is now exposed
+on the preview response; (4) the Import Lists page gained bulk multi-URL
+import (paste several deck URLs, each becomes its own auto-named list); (5)
+the Decks & Cubes overview gained select-all with bulk delete/refresh.
+**Complete and verified end-to-end**: a real Archidekt URL and a real
+Moxfield URL were both bulk-imported and auto-renamed to their real deck
+names (81 and 92 real cards respectively) through the exact API sequence
+the frontend uses; a real bulk refresh and real bulk delete were both run
+against real lists afterward. 301 backend tests pass; `ruff`, `mypy`, and
+the frontend `lint`/`build` are all clean.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key
@@ -541,6 +565,23 @@ variant of collection leverage (ARCHITECTURE.md).
     `backend` alone (`docker compose up -d --force-recreate backend`, no
     touching `frontend`) kept `/api/*` working end-to-end once backend
     became healthy again.
+27. **A per-card DB-lookup pricing helper built for one list's own on-demand
+    comparison page (`pricing_service.resolve_cheapest_price_for_oracle`,
+    one query per candidate printing per missing card) is *minutes* slow
+    when reused for every list on every `/metrics` scrape** (found live
+    while adding the `cardforge_list_missing_cost` gauge for a Grafana
+    scatter plot, post-Phase-7) — fine at its original, small-N, on-demand
+    scale, wildly wrong for a Prometheus-scraped endpoint hit every ~15s.
+    `app.metrics.dashboard_service.compute_list_missing_cost` was rewritten
+    as its own batched version instead (2 queries total for every list's
+    every missing card combined, not one query per card per provider) —
+    back down to the same ~0.6-0.8s the rest of `/metrics` already took.
+    Treat "how many DB round-trips does this do, and how often does the
+    *new* caller actually invoke it" as something to check explicitly
+    before reusing an existing service function in a scrape-frequency
+    (or otherwise hot/frequent) code path — a helper's existing docstring
+    saying "not batched, fine at this scale" is a warning label, not
+    boilerplate; a new caller can invalidate the "this scale" part.
 
 ## Principles to keep enforcing in later phases
 

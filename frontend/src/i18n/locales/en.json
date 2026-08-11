@@ -120,7 +120,12 @@
     "types": { "deck": "Deck", "cube": "Cube" },
     "create": "Create",
     "empty": "No decks or cubes yet.",
-    "columns": { "name": "Name", "type": "Type", "created": "Created" }
+    "columns": { "name": "Name", "type": "Type", "created": "Created" },
+    "bulkDelete_one": "Delete {{count}} selected",
+    "bulkDelete_other": "Delete {{count}} selected",
+    "bulkRefresh_one": "Refresh {{count}} selected",
+    "bulkRefresh_other": "Refresh {{count}} selected",
+    "bulkProgress": "{{done}} / {{total}}…"
   },
   "listsImportPage": {
     "targetList": "Deck / cube",
@@ -131,6 +136,12 @@
     "modeUrl": "From a URL",
     "urlLabel": "Deck URL",
     "urlHint": "Public Moxfield or Archidekt deck URLs — no login required. The list stays linked to this URL and can be refreshed later.",
+    "multiUrl": "Import multiple decks at once",
+    "multiUrlLabel": "Deck URLs (one per line)",
+    "multiUrlHint": "Each URL becomes its own new list, named from the real deck name once fetched. Public Moxfield or Archidekt URLs only, same as above.",
+    "multiUrlImport_one": "Import {{count}} deck",
+    "multiUrlImport_other": "Import {{count}} decks",
+    "multiUrlImporting": "Importing {{done}} / {{total}}…",
     "sourceTypes": {
       "text": "Text list",
       "json": "JSON",
@@ -282,7 +293,7 @@
     "cardNameLanguages": { "de": "German", "en": "English" },
     "cardNameLanguageHint": "By default, each card's name is shown in the language recorded for it on import. Forcing a language here shows every card in that language where a localized name is available, falling back to English otherwise.",
     "grafanaEmbedUrl": "Grafana embed URL",
-    "grafanaEmbedUrlHint": "Optional. Paste a Grafana \"Public Dashboard\" link (Share → Public dashboard, on the \"CardForge — High-Coverage Decks\" dashboard) to embed it on the Dashboard page below. Leave empty to hide that panel."
+    "grafanaEmbedUrlHint": "Optional. Paste a Grafana \"Public Dashboard\" link (Share → Public dashboard, on the \"CardForge — High-Coverage Decks\" dashboard) to embed it on the Dashboard page below. A path starting with /grafana/... works and stays on this app's own address — no separate host/port needed. Leave empty to hide that panel."
   },
   "dashboardPage": {
     "collection": "Collection",

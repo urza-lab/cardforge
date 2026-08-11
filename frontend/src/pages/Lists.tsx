@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { apiGet, apiPostJson, ApiError } from "../api/client";
+import { apiDelete, apiGet, apiPostJson, ApiError } from "../api/client";
 import { useSort } from "../hooks/useSort";
 import type { CardList, ListType } from "../types/lists";
 
@@ -13,9 +13,21 @@ export default function Lists() {
   const [listType, setListType] = useState<ListType>("deck");
   const [creating, setCreating] = useState(false);
 
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+
   function reload() {
     apiGet<CardList[]>("/lists")
-      .then(setLists)
+      .then((data) => {
+        setLists(data);
+        setSelected((prev) => {
+          const visible = new Set(data.map((l) => l.id));
+          const next = new Set([...prev].filter((id) => visible.has(id)));
+          return next.size === prev.size ? prev : next;
+        });
+      })
       .catch((err: unknown) => setError(err instanceof ApiError ? err.message : String(err)));
   }
 
@@ -42,6 +54,62 @@ export default function Lists() {
   function sortIndicator(key: keyof CardList) {
     if (sortKey !== key) return "";
     return direction === "asc" ? " ▲" : " ▼";
+  }
+
+  const allSelected = sorted.length > 0 && sorted.every((l) => selected.has(l.id));
+
+  function toggleOne(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected(allSelected ? new Set() : new Set(sorted.map((l) => l.id)));
+  }
+
+  const selectedRefreshable = sorted.filter((l) => selected.has(l.id) && !!l.source_url);
+
+  async function handleBulkDelete() {
+    const targets = sorted.filter((l) => selected.has(l.id));
+    if (targets.length === 0) return;
+    setBulkBusy(true);
+    setBulkError(null);
+    setBulkProgress({ done: 0, total: targets.length });
+    for (let i = 0; i < targets.length; i++) {
+      try {
+        await apiDelete(`/lists/${targets[i].id}`);
+      } catch (err) {
+        setBulkError(err instanceof ApiError ? err.message : String(err));
+      }
+      setBulkProgress({ done: i + 1, total: targets.length });
+    }
+    setBulkBusy(false);
+    setBulkProgress(null);
+    setSelected(new Set());
+    reload();
+  }
+
+  async function handleBulkRefresh() {
+    const targets = selectedRefreshable;
+    if (targets.length === 0) return;
+    setBulkBusy(true);
+    setBulkError(null);
+    setBulkProgress({ done: 0, total: targets.length });
+    for (let i = 0; i < targets.length; i++) {
+      try {
+        await apiPostJson(`/lists/${targets[i].id}/refresh`, {});
+      } catch (err) {
+        setBulkError(err instanceof ApiError ? err.message : String(err));
+      }
+      setBulkProgress({ done: i + 1, total: targets.length });
+    }
+    setBulkBusy(false);
+    setBulkProgress(null);
+    reload();
   }
 
   return (
@@ -84,55 +152,94 @@ export default function Lists() {
         {!lists && !error && <p>{t("common.loading")}</p>}
         {lists && lists.length === 0 && <p>{t("listsPage.empty")}</p>}
         {lists && lists.length > 0 && (
-          <div className="cf-table-wrap">
-            <table className="cf-table">
-              <thead>
-                <tr>
-                  <th className="cf-th-sortable" onClick={() => toggleSort("name")}>
-                    {t("listsPage.columns.name")}
-                    {sortIndicator("name")}
-                  </th>
-                  <th className="cf-th-sortable" onClick={() => toggleSort("list_type")}>
-                    {t("listsPage.columns.type")}
-                    {sortIndicator("list_type")}
-                  </th>
-                  <th className="cf-th-sortable" onClick={() => toggleSort("created_at")}>
-                    {t("listsPage.columns.created")}
-                    {sortIndicator("created_at")}
-                  </th>
-                  <th>{t("sourcesPage.columns.status")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((item) => (
-                  <tr key={item.id}>
-                    <td>
-                      <Link to={`/lists/${item.id}`}>{item.name}</Link>
-                    </td>
-                    <td>{t(`listsPage.types.${item.list_type}`)}</td>
-                    <td>{new Date(item.created_at).toLocaleDateString()}</td>
-                    <td>
-                      {item.source_url && (
-                        <span
-                          className={
-                            item.refresh_status === "FAILED" || item.refresh_status === "AUTH_REQUIRED"
-                              ? "cf-badge cf-badge-error"
-                              : item.is_stale
-                                ? "cf-badge cf-badge-warn"
-                                : "cf-badge cf-badge-ok"
-                          }
-                        >
-                          {item.is_stale
-                            ? t("listDetailPage.refreshStatus.STALE")
-                            : t(`listsImportPage.sourceTypes.${item.source_type}`)}
-                        </span>
-                      )}
-                    </td>
+          <>
+            {bulkError && <div className="cf-alert cf-alert-error">{bulkError}</div>}
+            <div className="cf-btn-row" style={{ alignItems: "center", gap: 10 }}>
+              <button
+                className="cf-btn"
+                disabled={selected.size === 0 || bulkBusy}
+                onClick={handleBulkDelete}
+              >
+                {bulkBusy && bulkProgress
+                  ? t("listsPage.bulkProgress", { done: bulkProgress.done, total: bulkProgress.total })
+                  : t("listsPage.bulkDelete", { count: selected.size })}
+              </button>
+              <button
+                className="cf-btn"
+                disabled={selectedRefreshable.length === 0 || bulkBusy}
+                onClick={handleBulkRefresh}
+              >
+                {bulkBusy && bulkProgress
+                  ? t("listsPage.bulkProgress", { done: bulkProgress.done, total: bulkProgress.total })
+                  : t("listsPage.bulkRefresh", { count: selectedRefreshable.length })}
+              </button>
+            </div>
+
+            <div className="cf-table-wrap">
+              <table className="cf-table">
+                <thead>
+                  <tr>
+                    <th>
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={toggleAll}
+                        aria-label={t("discoverPage.selectAll")}
+                      />
+                    </th>
+                    <th className="cf-th-sortable" onClick={() => toggleSort("name")}>
+                      {t("listsPage.columns.name")}
+                      {sortIndicator("name")}
+                    </th>
+                    <th className="cf-th-sortable" onClick={() => toggleSort("list_type")}>
+                      {t("listsPage.columns.type")}
+                      {sortIndicator("list_type")}
+                    </th>
+                    <th className="cf-th-sortable" onClick={() => toggleSort("created_at")}>
+                      {t("listsPage.columns.created")}
+                      {sortIndicator("created_at")}
+                    </th>
+                    <th>{t("sourcesPage.columns.status")}</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {sorted.map((item) => (
+                    <tr key={item.id}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(item.id)}
+                          onChange={() => toggleOne(item.id)}
+                        />
+                      </td>
+                      <td>
+                        <Link to={`/lists/${item.id}`}>{item.name}</Link>
+                      </td>
+                      <td>{t(`listsPage.types.${item.list_type}`)}</td>
+                      <td>{new Date(item.created_at).toLocaleDateString()}</td>
+                      <td>
+                        {item.source_url && (
+                          <span
+                            className={
+                              item.refresh_status === "FAILED" || item.refresh_status === "AUTH_REQUIRED"
+                                ? "cf-badge cf-badge-error"
+                                : item.is_stale
+                                  ? "cf-badge cf-badge-warn"
+                                  : "cf-badge cf-badge-ok"
+                            }
+                          >
+                            {item.is_stale
+                              ? t("listDetailPage.refreshStatus.STALE")
+                              : t(`listsImportPage.sourceTypes.${item.source_type}`)}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
     </div>

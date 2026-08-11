@@ -52,3 +52,26 @@ export async function apiPutJson<T>(path: string, body: unknown): Promise<T> {
   });
   return unwrap<T>(path, resp);
 }
+
+export async function apiPatchJson<T>(path: string, body: unknown): Promise<T> {
+  const resp = await fetch(`${API_BASE}${path}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return unwrap<T>(path, resp);
+}
+
+export async function apiDelete(path: string): Promise<void> {
+  const resp = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  if (!resp.ok && resp.status !== 204) {
+    let detail: string | undefined;
+    try {
+      const body = (await resp.json()) as { detail?: unknown };
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      // body wasn't JSON (or was empty) - fall through to the generic message.
+    }
+    throw new ApiError(resp.status, detail ?? `Request to ${path} failed with ${resp.status}`);
+  }
+}

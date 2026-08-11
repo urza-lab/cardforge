@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router-dom";
-import { apiGet, apiPostJson, ApiError } from "../api/client";
+import { apiDelete, apiGet, apiPostJson, ApiError } from "../api/client";
 import { useSort } from "../hooks/useSort";
 import type { CardList, CardListItem, ListComparisonResponse } from "../types/lists";
 import type { ComparisonMode } from "../types/comparison";
@@ -127,8 +127,7 @@ export default function ListDetail() {
     if (!id || !cardList) return;
     setDeleting(true);
     try {
-      const resp = await fetch(`/api/lists/${id}`, { method: "DELETE" });
-      if (!resp.ok) throw new ApiError(resp.status, `delete failed with ${resp.status}`);
+      await apiDelete(`/lists/${id}`);
       navigate("/lists");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));

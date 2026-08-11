@@ -16,6 +16,10 @@ class CardListCreate(BaseModel):
     list_type: str  # "deck" | "cube"
 
 
+class CardListUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+
+
 class CardListRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -91,6 +95,13 @@ class ListImportRead(BaseModel):
 class ListImportPreviewResponse(ListImportRead):
     rows: list[ListImportRowRead]
     is_likely_duplicate: bool
+    # Only set for URL-sourced previews (the real deck name the source
+    # reported, e.g. Moxfield's/Archidekt's own "name" field) - not an ORM
+    # column, filled in by the API layer from DeckFetchResult.deck_name
+    # (app/source_adapters/common.py), which was previously fetched and
+    # silently discarded. Lets the frontend auto-name a bulk-imported list
+    # from the real deck name instead of a user-typed placeholder.
+    deck_name: str | None = None
 
 
 class ListImportConfirmRequest(BaseModel):

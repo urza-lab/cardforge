@@ -23,11 +23,12 @@ from app.source_adapters.errors import SourceFetchError
 router = APIRouter(prefix="/api/list-imports", tags=["list-imports"])
 
 
-def _to_preview_response(import_record: ListImport) -> ListImportPreviewResponse:
+def _to_preview_response(import_record: ListImport, *, deck_name: str | None = None) -> ListImportPreviewResponse:
     return ListImportPreviewResponse(
         **ListImportRead.model_validate(import_record).model_dump(),
         rows=[ListImportRowRead.model_validate(row) for row in import_record.rows],
         is_likely_duplicate=import_record.duplicate_of_import_id is not None,
+        deck_name=deck_name,
     )
 
 
@@ -90,7 +91,7 @@ def preview_import_from_url(
 
     user_agent = get_settings().scryfall_user_agent  # same "identify ourselves honestly" UA for every outbound fetch
     try:
-        import_record = list_import_service.create_preview_from_url(
+        import_record, deck_name = list_import_service.create_preview_from_url(
             db, card_list=card_list, url=payload.url, user_agent=user_agent
         )
     except list_import_service.UnsupportedUrlError as exc:
@@ -102,7 +103,7 @@ def preview_import_from_url(
     except SourceFetchError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    return _to_preview_response(import_record)
+    return _to_preview_response(import_record, deck_name=deck_name)
 
 
 @router.get("", response_model=list[ListImportRead])

@@ -171,7 +171,13 @@ def create_preview(
 
 def create_preview_from_url(
     db: Session, *, card_list: CardList, url: str, user_agent: str, user_id: int = DEFAULT_USER_ID
-) -> ListImport:
+) -> tuple[ListImport, str | None]:
+    """Returns (import_record, deck_name) - deck_name is the source's own
+    real name for the deck (e.g. Moxfield's/Archidekt's "name" field), not
+    persisted anywhere by this function itself. Lets a caller that just
+    auto-created `card_list` with a placeholder name (bulk multi-URL import,
+    see ListsImport.tsx) rename it to the real one afterward.
+    """
     source_type = detect_url_adapter(url)
     adapter = URL_ADAPTERS[source_type]
     # Any AuthRequiredError/SourceFetchError/SsrfBlockedError from here
@@ -179,7 +185,7 @@ def create_preview_from_url(
     # nothing is persisted for a fetch that never produced data.
     fetch_result = adapter.fetch_and_parse(url, user_agent)
 
-    return _persist_preview(
+    import_record = _persist_preview(
         db,
         card_list=card_list,
         source_type=source_type,
@@ -189,6 +195,7 @@ def create_preview_from_url(
         parse_result=fetch_result.parse_result,
         user_id=user_id,
     )
+    return import_record, fetch_result.deck_name
 
 
 def list_imports(

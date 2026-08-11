@@ -42,6 +42,13 @@ def list_items(db: Session, list_id: int) -> list[CardListItem]:
     return list(db.scalars(stmt))
 
 
+def rename_list(db: Session, card_list: CardList, *, name: str) -> CardList:
+    card_list.name = name
+    db.commit()
+    db.refresh(card_list)
+    return card_list
+
+
 def delete_list(db: Session, card_list: CardList) -> None:
     db.delete(card_list)
     db.commit()

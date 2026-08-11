@@ -10,19 +10,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.comparison import ComparisonSettings, LeverageCandidate, compute_leverage
 from app.comparison.engine import compare
-from app.comparison.types import RequiredCard
+from app.comparison.types import MissingCard, RequiredCard
 from app.models.collection import CollectionItem
 from app.models.lists import CardList
-from app.models.pricing import PriceProvider, PriceSyncState
-from app.models.scryfall import SYNC_STATE_ID, ScryfallSyncState
+from app.models.pricing import PriceObservation, PriceProvider, PriceSyncState
+from app.models.scryfall import SYNC_STATE_ID, ScryfallCard, ScryfallSyncState
 from app.models.user import DEFAULT_USER_ID
-from app.services import collection_service
+from app.services import collection_service, pricing_service
 from app.services.comparison_service import _owned_cards, _required_cards_for_lists
 
 # Capped so a household with dozens of decks/cubes doesn't turn every
@@ -40,6 +41,19 @@ class ListBuildability:
     list_type: str
     coverage_percent: float
     is_fully_buildable: bool
+    # In-memory only - not part of ListBuildabilityRead (app/schemas/dashboard.py
+    # whitelists fields explicitly), kept here so compute_list_missing_cost
+    # below doesn't need to re-run compare() from scratch for the same list.
+    missing: list[MissingCard] = field(default_factory=list, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class ListMissingCost:
+    list_id: int
+    name: str
+    list_type: str
+    total_cost: Decimal
+    currency: str
 
 
 @dataclass(frozen=True)
@@ -86,9 +100,100 @@ def compute_list_buildability(
                 list_type=card_list.list_type,
                 coverage_percent=result.coverage_percent,
                 is_fully_buildable=result.is_fully_buildable,
+                missing=result.missing,
             )
         )
     return list_buildability, lists_required
+
+
+def compute_list_missing_cost(
+    db: Session, list_buildability: list[ListBuildability], *, user_id: int = DEFAULT_USER_ID
+) -> list[ListMissingCost]:
+    """Total cost to complete each list (sum of missing-card prices), using
+    the user's default price profile - real market prices only (Scryfall/
+    MTGJSON sync, see PRICING.md), never estimated. A list is only included
+    if *every* one of its missing cards actually resolved a price - "no fake
+    success": a partial total that silently excludes unpriced cards would
+    understate the real cost, so it's omitted entirely rather than shown as
+    a misleadingly low number.
+
+    Deliberately NOT built on pricing_service.price_missing_cards/
+    resolve_cheapest_price_for_oracle - those do one (or several) DB
+    round-trips per missing card, which is fine for their actual callers (a
+    single list's own comparison page, on demand) but was confirmed live to
+    take minutes across a real collection's real decks when run for every
+    list on every call here - this is reached from the Prometheus exporter,
+    scraped on a timer, so it needs to stay a small constant number of
+    queries regardless of how many cards are missing across how many lists.
+    """
+    profile = pricing_service.get_or_create_default_price_profile(db, user_id=user_id)
+
+    oracle_ids = {m.oracle_id for lb in list_buildability for m in lb.missing if m.oracle_id}
+    direct_card_ids = {
+        m.scryfall_card_id for lb in list_buildability for m in lb.missing if not m.oracle_id and m.scryfall_card_id
+    }
+
+    # oracle_id -> every printing's scryfall_card_id (oracle-mode pricing
+    # takes the cheapest printing, same "any printing satisfies this"
+    # philosophy as oracle-mode comparison itself).
+    printings_by_oracle: dict[str, list[str]] = {}
+    if oracle_ids:
+        for card_id, oracle_id in db.execute(
+            select(ScryfallCard.id, ScryfallCard.oracle_id).where(ScryfallCard.oracle_id.in_(oracle_ids))
+        ):
+            printings_by_oracle.setdefault(oracle_id, []).append(card_id)
+
+    all_card_ids = {cid for ids in printings_by_oracle.values() for cid in ids} | direct_card_ids
+
+    # (scryfall_card_id, provider) -> price, one query total instead of one
+    # per (card, provider) pair - already scoped to this profile's currency/
+    # foil preference, so resolving a price from here on is a plain
+    # in-memory provider-priority walk with no further DB access.
+    price_by_card_provider: dict[tuple[str, str], Decimal] = {}
+    if all_card_ids:
+        for card_id, provider, price in db.execute(
+            select(PriceObservation.scryfall_card_id, PriceObservation.provider, PriceObservation.price).where(
+                PriceObservation.scryfall_card_id.in_(all_card_ids),
+                PriceObservation.currency == profile.currency,
+                PriceObservation.foil == profile.prefer_foil,
+            )
+        ):
+            price_by_card_provider[(card_id, provider)] = price
+
+    def cheapest_price(card_ids: list[str]) -> Decimal | None:
+        best: Decimal | None = None
+        for card_id in card_ids:
+            for provider in profile.provider_priority:
+                price = price_by_card_provider.get((card_id, provider))
+                if price is not None:
+                    if best is None or price < best:
+                        best = price
+                    break  # this printing's cheapest-available-provider price is settled - move on
+        return best
+
+    def price_for(missing: MissingCard) -> Decimal | None:
+        if missing.oracle_id:
+            return cheapest_price(printings_by_oracle.get(missing.oracle_id, []))
+        if missing.scryfall_card_id:
+            return cheapest_price([missing.scryfall_card_id])
+        return None
+
+    results: list[ListMissingCost] = []
+    for lb in list_buildability:
+        total = Decimal(0)
+        fully_priced = True
+        for m in lb.missing:
+            price = price_for(m)
+            if price is None:
+                fully_priced = False
+                break
+            total += price * m.missing_quantity
+        if fully_priced:
+            results.append(
+                ListMissingCost(list_id=lb.list_id, name=lb.name, list_type=lb.list_type, total_cost=total, currency=profile.currency)
+            )
+
+    return results
 
 
 def get_dashboard_summary(db: Session, user_id: int = DEFAULT_USER_ID) -> DashboardSummary:

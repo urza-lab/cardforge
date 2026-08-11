@@ -7,7 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.lists import CardList
-from app.schemas.lists import CardListCreate, CardListItemRead, CardListRead, ListComparisonResponse
+from app.schemas.lists import (
+    CardListCreate,
+    CardListItemRead,
+    CardListRead,
+    CardListUpdate,
+    ListComparisonResponse,
+)
 from app.services import (
     collection_service,
     comparison_service,
@@ -63,6 +69,15 @@ def refresh_list(list_id: int, db: Session = Depends(get_db)) -> CardListRead:
         ) from exc
     except list_refresh_service.RefreshAlreadyInProgressError as exc:
         raise HTTPException(status_code=409, detail="a refresh for this list is already in progress") from exc
+    return _to_read(card_list)
+
+
+@router.patch("/{list_id}", response_model=CardListRead)
+def update_list(list_id: int, payload: CardListUpdate, db: Session = Depends(get_db)) -> CardListRead:
+    card_list = list_service.get_list(db, list_id)
+    if card_list is None:
+        raise HTTPException(status_code=404, detail="list not found")
+    card_list = list_service.rename_list(db, card_list, name=payload.name)
     return _to_read(card_list)
 
 

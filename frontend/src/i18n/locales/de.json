@@ -120,7 +120,12 @@
     "types": { "deck": "Deck", "cube": "Cube" },
     "create": "Erstellen",
     "empty": "Noch keine Decks oder Cubes.",
-    "columns": { "name": "Name", "type": "Typ", "created": "Erstellt" }
+    "columns": { "name": "Name", "type": "Typ", "created": "Erstellt" },
+    "bulkDelete_one": "{{count}} ausgewählte löschen",
+    "bulkDelete_other": "{{count}} ausgewählte löschen",
+    "bulkRefresh_one": "{{count}} ausgewählte aktualisieren",
+    "bulkRefresh_other": "{{count}} ausgewählte aktualisieren",
+    "bulkProgress": "{{done}} / {{total}}…"
   },
   "listsImportPage": {
     "targetList": "Deck / Cube",
@@ -131,6 +136,12 @@
     "modeUrl": "Von einer URL",
     "urlLabel": "Deck-URL",
     "urlHint": "Öffentliche Moxfield- oder Archidekt-Deck-URLs — kein Login nötig. Die Liste bleibt mit dieser URL verknüpft und kann später aktualisiert werden.",
+    "multiUrl": "Mehrere Decks auf einmal importieren",
+    "multiUrlLabel": "Deck-URLs (eine pro Zeile)",
+    "multiUrlHint": "Jede URL wird eine eigene neue Liste, benannt nach dem echten Decknamen sobald abgerufen. Nur öffentliche Moxfield- oder Archidekt-URLs, wie oben.",
+    "multiUrlImport_one": "{{count}} Deck importieren",
+    "multiUrlImport_other": "{{count}} Decks importieren",
+    "multiUrlImporting": "Importiere {{done}} / {{total}}…",
     "sourceTypes": {
       "text": "Textliste",
       "json": "JSON",
@@ -282,7 +293,7 @@
     "cardNameLanguages": { "de": "Deutsch", "en": "Englisch" },
     "cardNameLanguageHint": "Standardmäßig wird jede Karte in der beim Import erfassten Sprache angezeigt. Erzwingst du hier eine Sprache, werden alle Karten in dieser Sprache angezeigt, sofern ein lokalisierter Name vorhanden ist — sonst auf Englisch.",
     "grafanaEmbedUrl": "Grafana-Einbettungs-URL",
-    "grafanaEmbedUrlHint": "Optional. Füge hier einen Grafana-\"Public Dashboard\"-Link ein (Share → Public dashboard, beim Dashboard \"CardForge — High-Coverage Decks\"), um es unten auf der Dashboard-Seite einzubetten. Leer lassen, um dieses Panel auszublenden."
+    "grafanaEmbedUrlHint": "Optional. Füge hier einen Grafana-\"Public Dashboard\"-Link ein (Share → Public dashboard, beim Dashboard \"CardForge — High-Coverage Decks\"), um es unten auf der Dashboard-Seite einzubetten. Ein Pfad, der mit /grafana/... beginnt, funktioniert und bleibt auf der eigenen Adresse dieser App — kein separater Host/Port nötig. Leer lassen, um dieses Panel auszublenden."
   },
   "dashboardPage": {
     "collection": "Sammlung",

@@ -288,6 +288,27 @@ def test_url_preview_confirm_sets_list_source(monkeypatch: pytest.MonkeyPatch):
     assert items[0]["card_name"] == "Sol Ring"
 
 
+def test_url_preview_exposes_deck_name(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(moxfield, "guarded_get", lambda url, **kwargs: _moxfield_response(200, _SAMPLE_MOXFIELD_DECK))
+
+    list_id = _create_list("Placeholder Name")
+    preview = client.post(
+        "/api/list-imports/preview-url",
+        json={"list_id": list_id, "url": "https://moxfield.com/decks/abc123"},
+    )
+    assert preview.json()["deck_name"] == "URL Test Deck"
+
+
+def test_file_preview_has_no_deck_name():
+    list_id = _create_list()
+    preview = client.post(
+        "/api/list-imports/preview",
+        data={"source_type": "text", "list_id": str(list_id)},
+        files={"file": ("deck.txt", b"1 Sol Ring\n", "text/plain")},
+    )
+    assert preview.json()["deck_name"] is None
+
+
 def test_url_preview_unsupported_url_400():
     list_id = _create_list()
     resp = client.post(

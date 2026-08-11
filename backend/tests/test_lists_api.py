@@ -33,6 +33,25 @@ def test_get_unknown_list_404():
     assert resp.status_code == 404
 
 
+def test_rename_list():
+    list_id = client.post("/api/lists", json={"name": "Old Name", "list_type": "deck"}).json()["id"]
+    resp = client.patch(f"/api/lists/{list_id}", json={"name": "New Name"})
+    assert resp.status_code == 200
+    assert resp.json()["name"] == "New Name"
+    assert client.get(f"/api/lists/{list_id}").json()["name"] == "New Name"
+
+
+def test_rename_unknown_list_404():
+    resp = client.patch("/api/lists/999999", json={"name": "Doesn't matter"})
+    assert resp.status_code == 404
+
+
+def test_rename_list_rejects_empty_name():
+    list_id = client.post("/api/lists", json={"name": "Has A Name", "list_type": "deck"}).json()["id"]
+    resp = client.patch(f"/api/lists/{list_id}", json={"name": ""})
+    assert resp.status_code == 422
+
+
 def test_items_of_empty_list_is_empty():
     created = client.post("/api/lists", json={"name": "Empty Deck", "list_type": "deck"}).json()
     resp = client.get(f"/api/lists/{created['id']}/items")

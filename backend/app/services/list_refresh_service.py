@@ -101,7 +101,7 @@ def run_refresh(db: Session, card_list: CardList) -> CardList:
     try:
         user_agent = get_settings().scryfall_user_agent
         try:
-            preview = list_import_service.create_preview_from_url(
+            preview, _deck_name = list_import_service.create_preview_from_url(
                 db, card_list=card_list, url=card_list.source_url, user_agent=user_agent
             )
         except AuthRequiredError as exc:

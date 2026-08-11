@@ -512,6 +512,46 @@ be decided without blocking implementation. All are changeable later.
   with grafana/prometheus's existing `restart: unless-stopped`, once
   started this way they also come back on their own after a host/Docker
   reboot with no compose command needed at all.
+- **The embed URL was first shipped as `http://<host>:3000/public-dashboards/
+  ...` (Grafana's own separate host port) - changed to a same-origin
+  `/grafana/public-dashboards/...` path after the user pointed out a
+  browser iframe can't reach an internal Docker network hostname, and asked
+  whether it could "stay on the docker network" instead of needing a second
+  host:port.** It can't literally stay docker-internal (the iframe still
+  renders in the user's own browser, which only ever sees published host
+  ports), but the practical goal - not needing to know/expose a second port
+  - is achievable by reverse-proxying Grafana under the app's own origin:
+  `frontend/nginx.conf` gained a `/grafana/` location (same resolve-per-
+  request pattern as `/api/`, see gotcha #26), and `GF_SERVER_ROOT_URL`/
+  `GF_SERVER_SERVE_FROM_SUB_PATH` (removed earlier per gotcha #24, when no
+  matching nginx location existed yet) were re-added now that one actually
+  does. `grafana_embed_url` now only ever needs to be a path, not a full
+  URL with its own host/port.
+- **A second panel (real scatter plot: coverage % vs. real cost to
+  complete) was added after the user asked, and confirmed real price data
+  already exists to back it** (Phase 6's MTGJSON/Scryfall syncs - see
+  PRICING.md). A new `cardforge_list_missing_cost{list_id,list_name,
+  list_type,currency}` gauge feeds it, using the same "omit rather than
+  show a partial number" rule as the coverage metric - a list only gets a
+  value if every one of its missing cards actually resolved a real price.
+  **A real, non-hypothetical performance bug was caught and fixed before
+  shipping this**: the first implementation reused
+  `pricing_service.resolve_cheapest_price_for_oracle` (built for, and fine
+  at, a single list's own on-demand comparison page) for every list on
+  every `/metrics` scrape - confirmed live to take minutes against the real
+  collection's real decks, wildly unacceptable for a Prometheus scrape
+  target hit every ~15s. Rewritten as a purpose-built batched version in
+  `app.metrics.dashboard_service.compute_list_missing_cost` (2 queries
+  total regardless of list/card count, instead of one query per missing
+  card per provider) - confirmed live back down to the same ~0.6-0.8s the
+  rest of `/metrics` already took. The `xychart` panel's own field-mapping
+  transformations (`joinByField` + `seriesMapping: "auto"`) could only be
+  verified as far as "the underlying query data reaches Grafana correctly
+  and the dashboard JSON provisions without error" - the transformation
+  chain and actual chart rendering happen client-side in the browser, which
+  this session has no tool to drive (same limitation noted throughout for
+  the CardForge frontend itself); treat the scatter plot as needing a
+  first real look before trusting its axes are what they claim to be.
 - **Found and fixed while wiring the embed above: Grafana's `GF_SERVER_
   ROOT_URL`/`GF_SERVER_SERVE_FROM_SUB_PATH` were pre-set (Phase 7) for a
   future nginx `/grafana/` reverse-proxy path that was never actually
@@ -601,6 +641,24 @@ be decided without blocking implementation. All are changeable later.
   already synthesized and stored as plain text at sync time — so import
   just sends that stored text through the exact same upload path a manually
   pasted text list already uses, with zero new backend import/parsing code.
+- **Bulk multi-URL deck import (Import Lists page, user-requested) reuses
+  the same three-call pipeline per URL, sequentially - no new backend
+  import path.** Each pasted URL gets its own auto-created `CardList`
+  (placeholder name derived from the URL's own last path segment, since a
+  list has to exist before `preview-url` can be called), then a real
+  `PATCH /api/lists/{id}` rename to the source's own actual deck name once
+  known. That rename endpoint, and exposing `DeckFetchResult.deck_name` on
+  `ListImportPreviewResponse` at all, didn't exist before this - the value
+  was already being fetched by `moxfield.py`/`archidekt.py` and silently
+  discarded every single-URL import this whole time.
+- **Bulk select-all delete/refresh on the Decks & Cubes overview
+  (user-requested) has no confirmation dialog, matching the single-list
+  delete button on the detail page** (`ListDetail.tsx`), which never had
+  one either - added consistently with the existing convention rather than
+  introducing a new interaction pattern only for the bulk case. Refresh
+  only ever targets selected lists that actually have a `source_url` -
+  silently skipping the rest rather than surfacing the expected `400
+  NotUrlSourcedError` a manually-imported list would otherwise 400 on.
 - **The color-identity filter is a subset match, not an exact match**
   (`app/services/discover_service.py` `list_popular_decks`): filtering by
   "WU" also returns a mono-W or mono-U deck, not only decks whose identity

@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { apiGet, apiPostForm, apiPostJson, ApiError } from "../api/client";
+import { apiGet, apiPatchJson, apiPostForm, apiPostJson, ApiError } from "../api/client";
 import type { CardList, ListImportPreview, ListImportSourceType, ListImportSummary, ListType } from "../types/lists";
 
 const SOURCE_TYPES: ListImportSourceType[] = ["text", "json", "csv"];
@@ -14,6 +14,44 @@ const FILE_ACCEPT: Record<ListImportSourceType, string> = {
 };
 const NEW_LIST_VALUE = "__new__";
 type ImportMode = "file" | "url";
+type BulkUrlState = "idle" | "importing" | "done" | "error";
+type BulkUrlResult = { listId: number; name: string } | { error: string };
+
+// A placeholder name shown only for the moment between creating the list
+// and confirming its import - renamed to the source's own real deck name
+// right after (see importOneUrl), or left as this fallback if that name
+// wasn't available (e.g. the fetch itself failed).
+function nameFromUrl(url: string): string {
+  try {
+    const parts = new URL(url).pathname.split("/").filter(Boolean);
+    const last = decodeURIComponent(parts[parts.length - 1] ?? "").replace(/[-_]+/g, " ").trim();
+    return last || url;
+  } catch {
+    return url;
+  }
+}
+
+async function importOneUrl(url: string): Promise<BulkUrlResult> {
+  const placeholderName = nameFromUrl(url);
+  try {
+    const list = await apiPostJson<CardList>("/lists", { name: placeholderName, list_type: "deck" });
+    const preview = await apiPostJson<ListImportPreview>("/list-imports/preview-url", { list_id: list.id, url });
+    await apiPostJson<ListImportSummary>(`/list-imports/${preview.id}/confirm`, { skip_bad_rows: true });
+
+    let finalName = placeholderName;
+    if (preview.deck_name && preview.deck_name !== placeholderName) {
+      try {
+        const renamed = await apiPatchJson<CardList>(`/lists/${list.id}`, { name: preview.deck_name });
+        finalName = renamed.name;
+      } catch {
+        // Import already succeeded - a rename failure shouldn't be reported as an import failure.
+      }
+    }
+    return { listId: list.id, name: finalName };
+  } catch (err) {
+    return { error: err instanceof ApiError ? err.message : String(err) };
+  }
+}
 
 export default function ListsImport() {
   const { t } = useTranslation();
@@ -33,6 +71,12 @@ export default function ListsImport() {
   const [skipBadRows, setSkipBadRows] = useState(false);
   const [result, setResult] = useState<ListImportSummary | null>(null);
   const [resultListId, setResultListId] = useState<number | null>(null);
+
+  const [multiUrl, setMultiUrl] = useState(false);
+  const [bulkUrls, setBulkUrls] = useState("");
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkState, setBulkState] = useState<Record<number, BulkUrlState>>({});
+  const [bulkResults, setBulkResults] = useState<Record<number, BulkUrlResult>>({});
 
   useEffect(() => {
     apiGet<CardList[]>("/lists")
@@ -133,10 +177,35 @@ export default function ListsImport() {
     setText("");
     setUrl("");
     setFormError(null);
+    setBulkUrls("");
+    setBulkState({});
+    setBulkResults({});
+  }
+
+  const bulkUrlLines = bulkUrls
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  async function handleBulkUrlImport() {
+    if (bulkUrlLines.length === 0) return;
+    setBulkRunning(true);
+    setBulkState({});
+    setBulkResults({});
+    for (let i = 0; i < bulkUrlLines.length; i++) {
+      setBulkState((s) => ({ ...s, [i]: "importing" }));
+      const outcome = await importOneUrl(bulkUrlLines[i]);
+      setBulkState((s) => ({ ...s, [i]: "error" in outcome ? "error" : "done" }));
+      setBulkResults((r) => ({ ...r, [i]: outcome }));
+    }
+    setBulkRunning(false);
   }
 
   const hasTargetList = selectedListId === NEW_LIST_VALUE ? !!newListName.trim() : !!selectedListId;
-  const canSubmit = hasTargetList && (mode === "url" ? !!url.trim() : !!text.trim() || !!file);
+  const canSubmit =
+    mode === "url" && multiUrl
+      ? false // bulk mode has its own submit button (handleBulkUrlImport), not this form's
+      : hasTargetList && (mode === "url" ? !!url.trim() : !!text.trim() || !!file);
 
   return (
     <div>
@@ -145,27 +214,29 @@ export default function ListsImport() {
 
       {!preview && !result && (
         <form className="cf-card" onSubmit={handlePreview}>
-          <div className="cf-form-row">
-            <label htmlFor="li-list">{t("listsImportPage.targetList")}</label>
-            <select
-              id="li-list"
-              className="cf-select"
-              value={selectedListId}
-              onChange={(e) => setSelectedListId(e.target.value)}
-            >
-              <option value="" disabled>
-                {t("listsImportPage.chooseList")}
-              </option>
-              {lists?.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name} ({t(`listsPage.types.${l.list_type}`)})
+          {!(mode === "url" && multiUrl) && (
+            <div className="cf-form-row">
+              <label htmlFor="li-list">{t("listsImportPage.targetList")}</label>
+              <select
+                id="li-list"
+                className="cf-select"
+                value={selectedListId}
+                onChange={(e) => setSelectedListId(e.target.value)}
+              >
+                <option value="" disabled>
+                  {t("listsImportPage.chooseList")}
                 </option>
-              ))}
-              <option value={NEW_LIST_VALUE}>{t("listsImportPage.newList")}</option>
-            </select>
-          </div>
+                {lists?.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name} ({t(`listsPage.types.${l.list_type}`)})
+                  </option>
+                ))}
+                <option value={NEW_LIST_VALUE}>{t("listsImportPage.newList")}</option>
+              </select>
+            </div>
+          )}
 
-          {selectedListId === NEW_LIST_VALUE && (
+          {!(mode === "url" && multiUrl) && selectedListId === NEW_LIST_VALUE && (
             <div className="cf-form-row" style={{ flexDirection: "row", gap: 10 }}>
               <input
                 className="cf-input"
@@ -245,6 +316,18 @@ export default function ListsImport() {
           )}
 
           {mode === "url" && (
+            <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <input
+                id="li-multi-url"
+                type="checkbox"
+                checked={multiUrl}
+                onChange={(e) => setMultiUrl(e.target.checked)}
+              />
+              <label htmlFor="li-multi-url" style={{ margin: 0 }}>{t("listsImportPage.multiUrl")}</label>
+            </div>
+          )}
+
+          {mode === "url" && !multiUrl && (
             <div className="cf-form-row">
               <label htmlFor="li-url">{t("listsImportPage.urlLabel")}</label>
               <input
@@ -260,12 +343,93 @@ export default function ListsImport() {
             </div>
           )}
 
+          {mode === "url" && multiUrl && (
+            <div className="cf-form-row">
+              <label htmlFor="li-bulk-urls">{t("listsImportPage.multiUrlLabel")}</label>
+              <textarea
+                id="li-bulk-urls"
+                className="cf-textarea"
+                rows={6}
+                placeholder={"https://moxfield.com/decks/...\nhttps://archidekt.com/decks/...\n..."}
+                value={bulkUrls}
+                disabled={bulkRunning}
+                onChange={(e) => setBulkUrls(e.target.value)}
+              />
+              <p style={{ fontSize: 13, color: "var(--cf-muted)" }}>{t("listsImportPage.multiUrlHint")}</p>
+            </div>
+          )}
+
+          {!(mode === "url" && multiUrl) && (
+            <div className="cf-btn-row">
+              <button type="submit" className="cf-btn cf-btn-primary" disabled={!canSubmit || busy}>
+                {busy ? t("common.loading") : t("importPage.preview")}
+              </button>
+            </div>
+          )}
+        </form>
+      )}
+
+      {!preview && !result && mode === "url" && multiUrl && (
+        <div className="cf-card">
           <div className="cf-btn-row">
-            <button type="submit" className="cf-btn cf-btn-primary" disabled={!canSubmit || busy}>
-              {busy ? t("common.loading") : t("importPage.preview")}
+            <button
+              className="cf-btn cf-btn-primary"
+              disabled={bulkUrlLines.length === 0 || bulkRunning}
+              onClick={handleBulkUrlImport}
+            >
+              {bulkRunning
+                ? t("listsImportPage.multiUrlImporting", {
+                    done: Object.values(bulkState).filter((s) => s === "done" || s === "error").length,
+                    total: bulkUrlLines.length,
+                  })
+                : t("listsImportPage.multiUrlImport", { count: bulkUrlLines.length })}
             </button>
           </div>
-        </form>
+
+          {bulkUrlLines.length > 0 && Object.keys(bulkState).length > 0 && (
+            <div className="cf-table-wrap" style={{ marginTop: 16 }}>
+              <table className="cf-table">
+                <thead>
+                  <tr>
+                    <th>{t("comparisonsPage.columns.name")}</th>
+                    <th>{t("importPage.columns.status")}</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bulkUrlLines.map((line, i) => {
+                    const state = bulkState[i] ?? "idle";
+                    const outcome = bulkResults[i];
+                    return (
+                      <tr key={i}>
+                        <td>{outcome && "name" in outcome ? outcome.name : line}</td>
+                        <td>
+                          {state === "importing" && t("common.loading")}
+                          {state === "done" && <span className="cf-badge cf-badge-ok">{t("importPage.status.ok")}</span>}
+                          {state === "error" && (
+                            <span
+                              className="cf-badge cf-badge-error"
+                              title={outcome && "error" in outcome ? outcome.error : ""}
+                            >
+                              {t("discoverPage.importFailed")}
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          {state === "done" && outcome && "listId" in outcome && (
+                            <Link className="cf-btn" to={`/lists/${outcome.listId}`}>
+                              {t("listsImportPage.viewList")}
+                            </Link>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       )}
 
       {preview && (

@@ -13,7 +13,7 @@ from prometheus_client import CollectorRegistry, Gauge, generate_latest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.metrics.dashboard_service import compute_list_buildability
+from app.metrics.dashboard_service import compute_list_buildability, compute_list_missing_cost
 from app.models.collection import CollectionItem
 from app.models.lists import CardList
 from app.models.pricing import PriceObservation, PriceProvider, PriceSyncState
@@ -51,6 +51,13 @@ def render_metrics(db: Session) -> bytes:
         ["list_id", "list_name", "list_type"],
         registry=registry,
     )
+    list_missing_cost = Gauge(
+        "cardforge_list_missing_cost",
+        "Real market cost (default price profile) to buy every missing card for a deck/cube. Only "
+        "reported when every missing card actually resolved a price - never a partial/estimated total.",
+        ["list_id", "list_name", "list_type", "currency"],
+        registry=registry,
+    )
 
     collection_items.set(db.scalar(select(func.count(CollectionItem.id))) or 0)
     collection_quantity.set(db.scalar(select(func.coalesce(func.sum(CollectionItem.quantity), 0))) or 0)
@@ -76,5 +83,10 @@ def render_metrics(db: Session) -> bytes:
         list_coverage_percent.labels(
             list_id=str(lb.list_id), list_name=lb.name, list_type=lb.list_type
         ).set(lb.coverage_percent)
+
+    for mc in compute_list_missing_cost(db, list_buildability):
+        list_missing_cost.labels(
+            list_id=str(mc.list_id), list_name=mc.name, list_type=mc.list_type, currency=mc.currency
+        ).set(float(mc.total_cost))
 
     return generate_latest(registry)
