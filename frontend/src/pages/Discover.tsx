@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { apiGet, apiPostJson, ApiError } from "../api/client";
@@ -8,6 +8,20 @@ import type { CardList, ListImportPreview, ListImportSummary } from "../types/li
 const POLL_INTERVAL_MS = 3000;
 
 type ImportState = "idle" | "importing" | "done" | "error";
+
+async function importDeck(deck: PopularDeck): Promise<{ listId: number } | { error: string }> {
+  try {
+    const list = await apiPostJson<CardList>("/lists", { name: deck.name, list_type: "deck" });
+    const preview = await apiPostJson<ListImportPreview>("/list-imports/preview-url", {
+      list_id: list.id,
+      url: deck.source_url,
+    });
+    await apiPostJson<ListImportSummary>(`/list-imports/${preview.id}/confirm`, { skip_bad_rows: true });
+    return { listId: list.id };
+  } catch (err) {
+    return { error: err instanceof ApiError ? err.message : String(err) };
+  }
+}
 
 export default function Discover() {
   const { t } = useTranslation();
@@ -20,9 +34,14 @@ export default function Discover() {
   const [decksError, setDecksError] = useState<string | null>(null);
   const [sort, setSort] = useState<"views" | "likes">("views");
   const [colorFilter, setColorFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<"" | "moxfield" | "archidekt">("");
 
   const [importState, setImportState] = useState<Record<number, ImportState>>({});
   const [importResult, setImportResult] = useState<Record<number, { listId: number } | { error: string }>>({});
+
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
 
   const fetchStatus = useCallback(() => {
     apiGet<DeckDiscoverySyncStatusRead>("/discover/decks/status")
@@ -33,13 +52,25 @@ export default function Discover() {
   const fetchDecks = useCallback(() => {
     const params = new URLSearchParams({ sort });
     if (colorFilter.trim()) params.set("color_identity", colorFilter.trim().toUpperCase());
+    if (sourceFilter) params.set("source", sourceFilter);
     apiGet<PopularDeck[]>(`/discover/decks?${params.toString()}`)
       .then(setDecks)
       .catch((err: unknown) => setDecksError(err instanceof ApiError ? err.message : String(err)));
-  }, [sort, colorFilter]);
+  }, [sort, colorFilter, sourceFilter]);
 
   useEffect(fetchStatus, [fetchStatus]);
   useEffect(fetchDecks, [fetchDecks]);
+
+  useEffect(() => {
+    // The deck list just changed (new sort/filter, or a fresh sync) - drop
+    // any selection that no longer refers to a visible row.
+    setSelected((prev) => {
+      if (!decks) return prev;
+      const visible = new Set(decks.map((d) => d.id));
+      const next = new Set([...prev].filter((id) => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [decks]);
 
   useEffect(() => {
     if (status?.status !== "FETCHING") return;
@@ -65,20 +96,47 @@ export default function Discover() {
 
   async function handleImport(deck: PopularDeck) {
     setImportState((s) => ({ ...s, [deck.id]: "importing" }));
-    try {
-      const list = await apiPostJson<CardList>("/lists", { name: deck.name, list_type: "deck" });
-      const preview = await apiPostJson<ListImportPreview>("/list-imports/preview-url", {
-        list_id: list.id,
-        url: deck.source_url,
-      });
-      await apiPostJson<ListImportSummary>(`/list-imports/${preview.id}/confirm`, { skip_bad_rows: true });
-      setImportState((s) => ({ ...s, [deck.id]: "done" }));
-      setImportResult((r) => ({ ...r, [deck.id]: { listId: list.id } }));
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : String(err);
-      setImportState((s) => ({ ...s, [deck.id]: "error" }));
-      setImportResult((r) => ({ ...r, [deck.id]: { error: message } }));
+    const result = await importDeck(deck);
+    setImportState((s) => ({ ...s, [deck.id]: "error" in result ? "error" : "done" }));
+    setImportResult((r) => ({ ...r, [deck.id]: result }));
+  }
+
+  const selectableDecks = useMemo(
+    () => (decks ?? []).filter((d) => importState[d.id] !== "done"),
+    [decks, importState]
+  );
+  const allSelectableSelected =
+    selectableDecks.length > 0 && selectableDecks.every((d) => selected.has(d.id));
+
+  function toggleOne(deckId: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(deckId)) next.delete(deckId);
+      else next.add(deckId);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected(allSelectableSelected ? new Set() : new Set(selectableDecks.map((d) => d.id)));
+  }
+
+  async function handleBulkImport() {
+    const targets = (decks ?? []).filter((d) => selected.has(d.id) && importState[d.id] !== "done");
+    if (targets.length === 0) return;
+
+    setBulkRunning(true);
+    setBulkProgress({ done: 0, total: targets.length });
+    for (let i = 0; i < targets.length; i++) {
+      const deck = targets[i];
+      setImportState((s) => ({ ...s, [deck.id]: "importing" }));
+      const result = await importDeck(deck);
+      setImportState((s) => ({ ...s, [deck.id]: "error" in result ? "error" : "done" }));
+      setImportResult((r) => ({ ...r, [deck.id]: result }));
+      setBulkProgress({ done: i + 1, total: targets.length });
     }
+    setSelected(new Set());
+    setBulkRunning(false);
   }
 
   const syncBadgeClass =
@@ -109,6 +167,9 @@ export default function Discover() {
         {status?.status === "FAILED" && status.error_message && (
           <div className="cf-alert cf-alert-error">{status.error_message}</div>
         )}
+        {status?.status === "CURRENT" && status.error_message && (
+          <div className="cf-alert cf-alert-warn">{status.error_message}</div>
+        )}
         <div className="cf-btn-row">
           <button
             className="cf-btn cf-btn-primary"
@@ -122,6 +183,19 @@ export default function Discover() {
 
       <div className="cf-card">
         <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "flex-end", gap: 10 }}>
+          <div>
+            <label htmlFor="disc-source">{t("discoverPage.source")}</label>
+            <select
+              id="disc-source"
+              className="cf-select"
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value as "" | "moxfield" | "archidekt")}
+            >
+              <option value="">{t("discoverPage.sourceAll")}</option>
+              <option value="moxfield">{t("discoverPage.sourceMoxfield")}</option>
+              <option value="archidekt">{t("discoverPage.sourceArchidekt")}</option>
+            </select>
+          </div>
           <div>
             <label htmlFor="disc-sort">{t("discoverPage.sortBy")}</label>
             <select id="disc-sort" className="cf-select" value={sort} onChange={(e) => setSort(e.target.value as "views" | "likes")}>
@@ -147,54 +221,86 @@ export default function Discover() {
         {decks && decks.length === 0 && <p>{t("discoverPage.empty")}</p>}
 
         {decks && decks.length > 0 && (
-          <div className="cf-table-wrap">
-            <table className="cf-table">
-              <thead>
-                <tr>
-                  <th>{t("comparisonsPage.columns.name")}</th>
-                  <th>{t("discoverPage.columns.author")}</th>
-                  <th>{t("discoverPage.columns.colors")}</th>
-                  <th>{t("discoverPage.columns.views")}</th>
-                  <th>{t("discoverPage.columns.likes")}</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {decks.map((deck) => {
-                  const state = importState[deck.id] ?? "idle";
-                  const result = importResult[deck.id];
-                  return (
-                    <tr key={deck.id}>
-                      <td>
-                        <a href={deck.source_url} target="_blank" rel="noreferrer">
-                          {deck.name}
-                        </a>
-                      </td>
-                      <td>{deck.author ?? "—"}</td>
-                      <td>{deck.color_identity && deck.color_identity.length > 0 ? deck.color_identity.join("") : "—"}</td>
-                      <td>{deck.view_count.toLocaleString()}</td>
-                      <td>{deck.like_count.toLocaleString()}</td>
-                      <td>
-                        {state === "done" && result && "listId" in result ? (
-                          <Link className="cf-btn" to={`/lists/${result.listId}`}>
-                            {t("discoverPage.viewList")}
-                          </Link>
-                        ) : state === "error" ? (
-                          <span title={result && "error" in result ? result.error : ""} className="cf-badge cf-badge-error">
-                            {t("discoverPage.importFailed")}
-                          </span>
-                        ) : (
-                          <button className="cf-btn" disabled={state === "importing"} onClick={() => handleImport(deck)}>
-                            {state === "importing" ? t("common.loading") : t("discoverPage.import")}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="cf-btn-row" style={{ alignItems: "center", gap: 10 }}>
+              <button
+                className="cf-btn cf-btn-primary"
+                disabled={selected.size === 0 || bulkRunning}
+                onClick={handleBulkImport}
+              >
+                {bulkRunning
+                  ? t("discoverPage.bulkImporting", { done: bulkProgress?.done ?? 0, total: bulkProgress?.total ?? 0 })
+                  : t("discoverPage.bulkImport", { count: selected.size })}
+              </button>
+            </div>
+
+            <div className="cf-table-wrap">
+              <table className="cf-table">
+                <thead>
+                  <tr>
+                    <th>
+                      <input
+                        type="checkbox"
+                        checked={allSelectableSelected}
+                        onChange={toggleAll}
+                        aria-label={t("discoverPage.selectAll")}
+                      />
+                    </th>
+                    <th>{t("comparisonsPage.columns.name")}</th>
+                    <th>{t("discoverPage.columns.source")}</th>
+                    <th>{t("discoverPage.columns.author")}</th>
+                    <th>{t("discoverPage.columns.colors")}</th>
+                    <th>{t("discoverPage.columns.views")}</th>
+                    <th>{t("discoverPage.columns.likes")}</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {decks.map((deck) => {
+                    const state = importState[deck.id] ?? "idle";
+                    const result = importResult[deck.id];
+                    return (
+                      <tr key={deck.id}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            disabled={state === "done"}
+                            checked={selected.has(deck.id)}
+                            onChange={() => toggleOne(deck.id)}
+                          />
+                        </td>
+                        <td>
+                          <a href={deck.source_url} target="_blank" rel="noreferrer">
+                            {deck.name}
+                          </a>
+                        </td>
+                        <td>{t(`discoverPage.source${deck.source === "archidekt" ? "Archidekt" : "Moxfield"}`)}</td>
+                        <td>{deck.author ?? "—"}</td>
+                        <td>{deck.color_identity && deck.color_identity.length > 0 ? deck.color_identity.join("") : "—"}</td>
+                        <td>{deck.view_count.toLocaleString()}</td>
+                        <td>{deck.like_count > 0 ? deck.like_count.toLocaleString() : "—"}</td>
+                        <td>
+                          {state === "done" && result && "listId" in result ? (
+                            <Link className="cf-btn" to={`/lists/${result.listId}`}>
+                              {t("discoverPage.viewList")}
+                            </Link>
+                          ) : state === "error" ? (
+                            <span title={result && "error" in result ? result.error : ""} className="cf-badge cf-badge-error">
+                              {t("discoverPage.importFailed")}
+                            </span>
+                          ) : (
+                            <button className="cf-btn" disabled={state === "importing"} onClick={() => handleImport(deck)}>
+                              {state === "importing" ? t("common.loading") : t("discoverPage.import")}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
     </div>

@@ -5,6 +5,8 @@ every page view: Moxfield's public search API rate-limited this project
 during development after only a handful of rapid requests, so browsing
 reads from here and a separate sync job (mirrors
 app/source_adapters/scryfall.py's own sync pattern) refreshes it on demand.
+Archidekt was added as a second source the same way — see
+app.services.discover_service.run_discovery_sync and SOURCE_ADAPTERS.md.
 """
 from __future__ import annotations
 
@@ -35,7 +37,7 @@ class PopularDeck(Base):
     __table_args__ = (UniqueConstraint("source", "external_id", name="uq_popular_decks_source_external_id"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    source: Mapped[str] = mapped_column(String(16), default="moxfield")  # only "moxfield" for now
+    source: Mapped[str] = mapped_column(String(16), default="moxfield")  # "moxfield" or "archidekt"
     external_id: Mapped[str] = mapped_column(String(64))  # Moxfield's own publicId
     name: Mapped[str] = mapped_column(String(256))
     author: Mapped[str | None] = mapped_column(String(128))

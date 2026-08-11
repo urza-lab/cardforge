@@ -13,25 +13,14 @@ shape to build CardListItem rows from, whichever adapter produced it.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import delete, insert
-from sqlalchemy.orm import Session
 
-from app.core.config import Settings, get_settings
-from app.models.discover import (
-    DISCOVERY_SYNC_STATE_ID,
-    DeckDiscoverySyncState,
-    DeckDiscoverySyncStatus,
-    PopularDeck,
-)
 from app.parsers.common import ParsedRow, ParseResult
 from app.security.ssrf_guard import AuthRequiredError, guarded_get
-from app.source_adapters.common import DeckFetchResult
+from app.source_adapters.common import DeckFetchResult, PopularDeckEntry
 from app.source_adapters.errors import InvalidUrlError, SourceFetchError
 
 SOURCE_NAME = "moxfield"
@@ -44,24 +33,16 @@ API_BASE = "https://api.moxfield.com/v2/decks/all"
 # see SOURCE_ADAPTERS.md "Documented default decisions").
 SEARCH_API = "https://api.moxfield.com/v2/decks/search"
 POPULAR_DECKS_PAGE_SIZE = 100
-POPULAR_DECKS_PAGES_PER_SORT = 2
+# 5 pages x 2 sorts x 100/page = up to 1000 raw rows before dedup - bumped
+# from the original 2 (291 real decks cached) after a user request for a
+# bigger local pool to browse/analyze against. Still well within the
+# pacing budget below (10 requests x 1.5s ~= 15s for the whole sync).
+POPULAR_DECKS_PAGES_PER_SORT = 5
 POPULAR_DECKS_SORTS = ("views", "likes")
 # A real 429 was hit during development after firing off many unique-query
 # requests back-to-back with no pacing at all - a small delay between each
 # of this sync's few requests keeps it respectful of Moxfield's servers.
 POPULAR_DECKS_REQUEST_DELAY_SECONDS = 1.5
-
-
-@dataclass(frozen=True)
-class PopularDeckEntry:
-    external_id: str
-    name: str
-    author: str | None
-    source_url: str
-    format: str
-    view_count: int
-    like_count: int
-    color_identity: list[str] | None
 
 # Moxfield's own top-level board buckets map directly to our section enum
 # (app.models.lists.ListItemSection) except "commanders"/"companions" -
@@ -197,61 +178,3 @@ def fetch_popular_decks(user_agent: str, *, fmt: str = "commander") -> list[Popu
                 )
 
     return list(by_id.values())
-
-
-def run_deck_discovery_sync(db: Session, settings: Settings | None = None) -> DeckDiscoverySyncState:
-    """Refreshes the popular_decks cache from a real Moxfield search - same
-    FETCHING/CURRENT/FAILED state machine and delete-then-reinsert-inside-
-    one-transaction shape as app.source_adapters.scryfall.run_bulk_sync,
-    scoped to source="moxfield" only (a future second discovery source
-    would delete/reinsert its own source's rows the same way, leaving
-    others untouched).
-    """
-    settings = settings or get_settings()
-    state = db.get(DeckDiscoverySyncState, DISCOVERY_SYNC_STATE_ID)
-    if state is None:
-        raise SourceFetchError("deck_discovery_sync_state row is missing - has the migration been applied?")
-
-    state.status = DeckDiscoverySyncStatus.fetching.value
-    state.started_at = datetime.now(UTC)
-    state.error_message = None
-    db.commit()
-
-    try:
-        decks = fetch_popular_decks(settings.scryfall_user_agent)
-
-        db.execute(delete(PopularDeck).where(PopularDeck.source == SOURCE_NAME))
-        if decks:
-            db.execute(
-                insert(PopularDeck),
-                [
-                    {
-                        "source": SOURCE_NAME,
-                        "external_id": d.external_id,
-                        "name": d.name,
-                        "author": d.author,
-                        "source_url": d.source_url,
-                        "format": d.format,
-                        "view_count": d.view_count,
-                        "like_count": d.like_count,
-                        "color_identity": d.color_identity,
-                    }
-                    for d in decks
-                ],
-            )
-
-        state.status = DeckDiscoverySyncStatus.current.value
-        state.deck_count = len(decks)
-        state.finished_at = datetime.now(UTC)
-        db.commit()
-    except Exception as exc:  # noqa: BLE001 - any failure must be recorded, not silently swallowed
-        db.rollback()
-        state = db.get(DeckDiscoverySyncState, DISCOVERY_SYNC_STATE_ID)
-        assert state is not None
-        state.status = DeckDiscoverySyncStatus.failed.value
-        state.error_message = str(exc)[:1024]
-        state.finished_at = datetime.now(UTC)
-        db.commit()
-        raise
-
-    return state

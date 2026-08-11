@@ -33,6 +33,14 @@ class UserSettings(Base):
     # every card name to that language regardless of the item's own language,
     # falling back to the English name where no localized name is mirrored.
     card_name_language: Mapped[str | None] = mapped_column(String(8))
+    # A Grafana "Public Dashboard" URL (see ARCHITECTURE.md "Documented
+    # default decisions" - EDHREC/discovery section neighbor) the Dashboard
+    # page iframes if set. Not auto-provisioned (Grafana OSS has no
+    # file-based provisioning for public-dashboard shares, only its HTTP
+    # API) - the user pastes in the link generated via Grafana's own
+    # Share -> Public dashboard action, or the one printed by the setup
+    # helper. None = not configured, Dashboard page shows setup hint instead.
+    grafana_embed_url: Mapped[str | None] = mapped_column(String(512))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 

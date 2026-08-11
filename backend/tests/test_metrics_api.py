@@ -66,3 +66,32 @@ def test_metrics_includes_price_observations_by_provider():
 
     body = client.get("/metrics").text
     assert 'cardforge_price_observations_total{provider="manual"} 1.0' in body
+
+
+def test_metrics_includes_per_list_coverage_percent():
+    db = get_sessionmaker()()
+    try:
+        db.add(
+            ScryfallCard(
+                id="1f0d2e46-25e6-4415-8c00-53abaf7de520", oracle_id="6ad8011d-3471-4369-9d68-b264cc027487",
+                name="Sol Ring", set_code="C21", set_name="Commander 2021",
+                collector_number="263", lang="en", layout="normal",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    list_id = client.post("/api/lists", json={"name": "Metrics Test Deck", "list_type": "deck"}).json()["id"]
+    preview = client.post(
+        "/api/list-imports/preview",
+        data={"source_type": "text", "list_id": str(list_id)},
+        files={"file": ("deck.txt", b"1 Sol Ring\n", "text/plain")},
+    ).json()
+    client.post(f"/api/list-imports/{preview['id']}/confirm", json={"skip_bad_rows": False})
+
+    body = client.get("/metrics").text
+    assert (
+        f'cardforge_list_coverage_percent{{list_id="{list_id}",list_name="Metrics Test Deck",list_type="deck"}} 0.0'
+        in body
+    )

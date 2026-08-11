@@ -23,12 +23,16 @@ def update_settings(payload: UserSettingsUpdate, db: Session = Depends(get_db)) 
     card_name_language = (
         payload.card_name_language if "card_name_language" in payload.model_fields_set else settings_service.UNSET
     )
+    grafana_embed_url = (
+        payload.grafana_embed_url if "grafana_embed_url" in payload.model_fields_set else settings_service.UNSET
+    )
     try:
         settings = settings_service.update_settings(
             db,
             default_comparison_mode=payload.default_comparison_mode,
             preferred_currency=payload.preferred_currency,
             card_name_language=card_name_language,
+            grafana_embed_url=grafana_embed_url,
         )
     except settings_service.InvalidComparisonModeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

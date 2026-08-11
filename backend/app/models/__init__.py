@@ -5,6 +5,7 @@ from app.models.discover import (
     DeckDiscoverySyncStatus,
     PopularDeck,
 )
+from app.models.edhrec import EDHREC_SYNC_STATE_ID, EdhrecSyncState, EdhrecSyncStatus, SynthesizedDeck
 from app.models.imports import Import, ImportRow, ImportRowStatus, ImportSourceType, ImportStatus
 from app.models.lists import (
     CardList,
@@ -37,6 +38,7 @@ __all__ = [
     "DEFAULT_PROVIDER_PRIORITY",
     "DEFAULT_USER_ID",
     "DISCOVERY_SYNC_STATE_ID",
+    "EDHREC_SYNC_STATE_ID",
     "SYNC_STATE_ID",
     "CardList",
     "CardListItem",
@@ -44,6 +46,8 @@ __all__ = [
     "CollectionItem",
     "DeckDiscoverySyncState",
     "DeckDiscoverySyncStatus",
+    "EdhrecSyncState",
+    "EdhrecSyncStatus",
     "Import",
     "ImportRow",
     "ImportRowStatus",
@@ -65,6 +69,7 @@ __all__ = [
     "ScryfallCard",
     "ScryfallSyncState",
     "ScryfallSyncStatus",
+    "SynthesizedDeck",
     "User",
     "UserSettings",
 ]

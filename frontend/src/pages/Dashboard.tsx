@@ -3,16 +3,21 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { apiGet, ApiError } from "../api/client";
 import type { DashboardSummary } from "../types/dashboard";
+import type { UserSettings } from "../types/settings";
 
 export default function Dashboard() {
   const { t } = useTranslation();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [grafanaEmbedUrl, setGrafanaEmbedUrl] = useState<string | null>(null);
 
   useEffect(() => {
     apiGet<DashboardSummary>("/dashboard")
       .then(setSummary)
       .catch((err: unknown) => setError(err instanceof ApiError ? err.message : String(err)));
+    apiGet<UserSettings>("/settings")
+      .then((s) => setGrafanaEmbedUrl(s.grafana_embed_url))
+      .catch(() => undefined); // optional feature - a settings fetch failure shouldn't block the rest of the dashboard
   }, []);
 
   function syncBadgeClass(status: string) {
@@ -139,6 +144,22 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      <div className="cf-card">
+        <h3 style={{ marginTop: 0 }}>{t("dashboardPage.grafana.title")}</h3>
+        {grafanaEmbedUrl ? (
+          <iframe
+            src={grafanaEmbedUrl}
+            title={t("dashboardPage.grafana.title")}
+            style={{ width: "100%", height: 480, border: "none", borderRadius: 6 }}
+          />
+        ) : (
+          <p style={{ color: "var(--cf-muted)", marginTop: 0 }}>
+            {t("dashboardPage.grafana.notConfigured")}{" "}
+            <Link to="/settings">{t("nav.settings")}</Link>.
+          </p>
+        )}
+      </div>
 
       <div className="cf-card">
         <h3 style={{ marginTop: 0 }}>{t("dashboardPage.sources")}</h3>

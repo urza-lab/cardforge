@@ -8,8 +8,7 @@ import logging
 
 from app.core.database import get_sessionmaker
 from app.models.lists import CardList
-from app.services import list_refresh_service
-from app.source_adapters.moxfield import run_deck_discovery_sync
+from app.services import discover_service, edhrec_service, list_refresh_service
 from app.source_adapters.mtgjson import run_price_sync
 from app.source_adapters.scryfall import run_bulk_sync
 
@@ -38,7 +37,16 @@ def sync_popular_decks() -> None:
     session_local = get_sessionmaker()
     db = session_local()
     try:
-        run_deck_discovery_sync(db)
+        discover_service.run_discovery_sync(db)
+    finally:
+        db.close()
+
+
+def sync_edhrec_decks() -> None:
+    session_local = get_sessionmaker()
+    db = session_local()
+    try:
+        edhrec_service.run_edhrec_sync(db)
     finally:
         db.close()
 

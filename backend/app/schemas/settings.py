@@ -11,6 +11,7 @@ class UserSettingsRead(BaseModel):
     default_comparison_mode: str
     preferred_currency: str
     card_name_language: str | None
+    grafana_embed_url: str | None
     updated_at: datetime
 
 
@@ -23,3 +24,6 @@ class UserSettingsUpdate(BaseModel):
     # settings_service.update_settings (which has its own UNSET sentinel for
     # the same reason).
     card_name_language: str | None = None
+    # Same "None is meaningful" reasoning as card_name_language - None means
+    # "not configured", not "leave untouched".
+    grafana_embed_url: str | None = None

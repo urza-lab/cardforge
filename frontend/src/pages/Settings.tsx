@@ -94,6 +94,22 @@ export default function Settings() {
               {t("settingsPage.cardNameLanguageHint")}
             </p>
           </div>
+
+          <div className="cf-form-row">
+            <label htmlFor="settings-grafana-embed">{t("settingsPage.grafanaEmbedUrl")}</label>
+            <input
+              id="settings-grafana-embed"
+              className="cf-input"
+              value={settings.grafana_embed_url ?? ""}
+              disabled={busy}
+              placeholder="http://<host>:3000/public-dashboards/..."
+              onChange={(e) => setSettings({ ...settings, grafana_embed_url: e.target.value })}
+              onBlur={(e) => save({ grafana_embed_url: e.target.value.trim() || null })}
+            />
+            <p style={{ fontSize: 12, color: "var(--cf-muted)", margin: 0 }}>
+              {t("settingsPage.grafanaEmbedUrlHint")}
+            </p>
+          </div>
         </div>
       )}
     </div>

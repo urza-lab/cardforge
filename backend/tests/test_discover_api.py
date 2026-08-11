@@ -71,3 +71,11 @@ def test_list_decks_color_identity_filter():
     resp = client.get("/api/discover/decks?color_identity=WU").json()
     names = {d["name"] for d in resp}
     assert names == {"Mono W", "WU Deck"}  # subset-of-WU matches; 5c deck doesn't
+
+
+def test_list_decks_source_filter():
+    _seed_deck(external_id="mox-1", name="Mox Deck", source="moxfield")
+    _seed_deck(external_id="ark-1", name="Ark Deck", source="archidekt")
+
+    resp = client.get("/api/discover/decks?source=archidekt").json()
+    assert [d["name"] for d in resp] == ["Ark Deck"]

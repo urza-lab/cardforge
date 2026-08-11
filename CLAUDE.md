@@ -182,6 +182,72 @@ compose down && up -d --build` cycle was verified afterward with the real
 collection, the real Scryfall/MTGJSON caches, and the real 291-deck
 discovery cache all intact.
 
+**Discover Decks expanded, user-requested:** three follow-up ideas
+("bulk-download Moxfield's/Archidekt's/EDHREC's popular decks?") were
+researched live rather than assumed. Findings: Moxfield has no separate
+public bulk-file endpoint (`/v2/decks/bulk`/`/v2/decks/export` are
+auth-gated "export my own decks," not a public dataset) — the existing
+paginated search already serves that role, so `POPULAR_DECKS_PAGES_PER_SORT`
+was simply raised 2 → 5. Archidekt's original "needs auth" conclusion (from
+the initial cubes/decks research) turned out to be based on trying only the
+wrong endpoint — a real public search API was found this time
+(`/api/decks/v3/`), and added as a second discovery source (see
+SOURCE_ADAPTERS.md, ARCHITECTURE.md "Documented default decisions"). EDHREC
+was investigated separately — see below, it needed a materially different
+approach and its own decision point. **Complete and verified end-to-end**:
+a real sync landed 693 real Moxfield decks + 300 real Archidekt decks (993
+total, including a real 402k-view Archidekt deck) in ~23 seconds, both
+sources merging into one cache with no cross-source interference; a real
+one-click import of an Archidekt-discovered deck through the unchanged
+URL-import pipeline landed 81/81 rows with 0 errors. A frontend-only bulk
+"select decks, import all" action (checkbox + "select all" + sequential
+per-deck progress) was added on top of the same three-call import sequence
+— no backend changes needed for that part. 275 backend tests pass; `ruff`,
+`mypy`, and the frontend `lint`/`build` are all clean.
+
+**EDHREC synthesized decks, user-requested as the third of the same three
+follow-up ideas above.** This one needed real design decisions, not just
+another source in the same list — asked via AskUserQuestion rather than
+assumed: EDHREC has no hosted decklists, only real per-commander card
+statistics scraped from each page's embedded `__NEXT_DATA__` JSON (same
+technique that found Archidekt's real search API). User chose scope
+(top 100 commanders, the full real popularity ranking EDHREC exposes) and
+UI placement (its own tab, not mixed into the Discover Decks list, since a
+computed "average deck" is a materially different thing from a real
+decklist someone built) - see ARCHITECTURE.md "Documented default
+decisions" and SOURCE_ADAPTERS.md for the full real page-data shape found.
+**Complete and verified end-to-end**: a real sync synthesized all 100 real
+top commanders in ~88 seconds with zero per-commander failures (~600-700KB
+HTML fetched per commander page, no rate-limiting seen); a real import of
+the top-ranked synthesized deck ("The Ur-Dragon", 49,562 real EDHREC decks)
+landed 100/100 rows with 0 parse errors through the *existing* upload-based
+text-import endpoint (no new import/parsing code — EDHREC's synthesized
+`deck_text` is just sent through the same path a manually pasted list
+already uses, unlike Moxfield/Archidekt's URL-fetch-at-import path). 290
+backend tests pass; `ruff`, `mypy`, and the frontend `lint`/`build` are all
+clean.
+
+**Grafana panel embed, the last of the same batch of user-requested ideas.**
+A new `cardforge_list_coverage_percent` gauge plus a dedicated Grafana
+dashboard (`grafana/dashboards/cardforge-high-coverage.json`) show
+decks/cubes ranked by real buildability coverage, with clickable links back
+into CardForge. Embedding it needed a real security decision, asked rather
+than assumed — see ARCHITECTURE.md: Grafana's built-in "Public Dashboard"
+sharing (verified live on the pinned `grafana-oss:11.4.0`) was chosen over
+blanket anonymous access, since it scopes unauthenticated viewing to
+exactly this one dashboard rather than all of Grafana, at the same
+implementation cost. Building this also surfaced and fixed a real
+pre-existing bug from Phase 7 (gotcha #24): a `/grafana/` sub-path redirect
+config for a reverse-proxy path that was never actually built was silently
+breaking direct Grafana access this whole time. **Complete and verified
+end-to-end**: the real metric was confirmed scraped by Prometheus with real
+coverage numbers for the user's actual decks; a real Public Dashboard share
+was created via Grafana's API and confirmed to return real, correctly
+labeled panel data over an unauthenticated request; the resulting URL was
+saved through `PUT /api/settings` exactly as the Settings page would. 294
+backend tests pass; `ruff`, `mypy`, and the frontend `lint`/`build` are all
+clean.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key
@@ -432,6 +498,25 @@ variant of collection leverage (ARCHITECTURE.md).
     `updated`/`name` (not `trending`/`popularity`/`hot`/`velocity`/
     `random`), and there is no `cube` value for `fmt` — don't re-guess
     these; see SOURCE_ADAPTERS.md for what's actually confirmed to work.
+24. **Grafana's `GF_SERVER_SERVE_FROM_SUB_PATH=true` + a `/grafana/`
+    `GF_SERVER_ROOT_URL` (set in Phase 7 for a reverse-proxy path that was
+    never actually built) 301-redirects *every* direct request to that
+    nonexistent sub-path** (found while wiring the Grafana embed feature
+    post-Phase-7) — including the embed's own URL, which then 404'd since
+    `frontend/nginx.conf` has no `/grafana/` location and never did. Fixed
+    by removing both settings; Grafana is only ever reached directly on its
+    own `GRAFANA_HOST_PORT` in this project, not proxied, so it needs its
+    own defaults. If a real `/grafana/` nginx proxy is ever added later,
+    both settings need to come back together with the matching nginx
+    location — don't re-add one without the other.
+25. **Grafana OSS's "Public Dashboard" share links have no file-based
+    provisioning** (unlike datasources/dashboards, which do — see
+    `grafana/provisioning/`) — only its HTTP API or Share UI can create one,
+    and the resulting access token is stored in Grafana's own database
+    (persists across container recreates via the `./data/grafana`
+    bind-mount, confirmed live). Don't try to provision one via YAML; it has
+    to be a one-time API call or UI action, with the resulting URL then
+    handed to the app (here: pasted into Settings → `grafana_embed_url`).
 
 ## Principles to keep enforcing in later phases
 

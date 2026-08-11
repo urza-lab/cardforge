@@ -1,0 +1,103 @@
+{
+  "title": "CardForge — High-Coverage Decks",
+  "uid": "cardforge-high-coverage",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "refresh": "5m",
+  "time": { "from": "now-24h", "to": "now" },
+  "tags": ["cardforge"],
+  "templating": {
+    "list": [
+      {
+        "name": "app_base_url",
+        "type": "textbox",
+        "label": "CardForge base URL",
+        "description": "Where this Grafana instance can reach the CardForge web UI - used for the deck/cube links below. Change this if your CardForge isn't at the default LXC address.",
+        "query": "http://docker.trusted.local:666",
+        "current": { "value": "http://docker.trusted.local:666", "text": "http://docker.trusted.local:666" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Decks & cubes by buildability coverage",
+      "description": "Which decks/cubes are closest to (or already) fully buildable from your collection - click a name to open it in CardForge. See app.metrics.prometheus_exporter's cardforge_list_coverage_percent gauge.",
+      "gridPos": { "h": 14, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "cardforge_list_coverage_percent", "instant": true, "format": "table", "refId": "A" }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "__name__": true, "instance": true, "job": true },
+            "indexByName": {},
+            "renameByName": { "list_id": "list_id", "list_name": "Deck / Cube", "list_type": "Type", "Value": "Coverage %" }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": { "fields": {}, "sort": [{ "field": "Coverage %", "desc": true }] }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" } },
+          "unit": "percent",
+          "min": 0,
+          "max": 100
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "list_id" },
+            "properties": [{ "id": "custom.hidden", "value": true }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Deck / Cube" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open in CardForge",
+                    "url": "${app_base_url}/lists/${__data.fields.list_id}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Coverage %" },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background",
+                  "mode": "gradient"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    { "color": "red", "value": 0 },
+                    { "color": "yellow", "value": 50 },
+                    { "color": "green", "value": 90 }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "cellHeight": "sm" }
+    }
+  ]
+}

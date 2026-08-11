@@ -39,6 +39,7 @@ def update_settings(
     default_comparison_mode: str | None = None,
     preferred_currency: str | None = None,
     card_name_language: str | None = UNSET,
+    grafana_embed_url: str | None = UNSET,
     user_id: int = DEFAULT_USER_ID,
 ) -> UserSettings:
     settings = get_settings(db, user_id)
@@ -61,6 +62,9 @@ def update_settings(
                 f"got '{card_name_language}'"
             )
         settings.card_name_language = card_name_language.lower() if card_name_language else None
+
+    if grafana_embed_url is not UNSET:
+        settings.grafana_embed_url = grafana_embed_url.strip() if grafana_embed_url else None
 
     db.commit()
     db.refresh(settings)

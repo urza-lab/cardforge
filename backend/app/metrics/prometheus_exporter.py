@@ -13,6 +13,7 @@ from prometheus_client import CollectorRegistry, Gauge, generate_latest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.metrics.dashboard_service import compute_list_buildability
 from app.models.collection import CollectionItem
 from app.models.lists import CardList
 from app.models.pricing import PriceObservation, PriceProvider, PriceSyncState
@@ -44,6 +45,12 @@ def render_metrics(db: Session) -> bytes:
     price_observations_total = Gauge(
         "cardforge_price_observations_total", "Price observations by provider", ["provider"], registry=registry
     )
+    list_coverage_percent = Gauge(
+        "cardforge_list_coverage_percent",
+        "Buildability coverage percent (0-100) of each deck/cube against the default collection",
+        ["list_id", "list_name", "list_type"],
+        registry=registry,
+    )
 
     collection_items.set(db.scalar(select(func.count(CollectionItem.id))) or 0)
     collection_quantity.set(db.scalar(select(func.coalesce(func.sum(CollectionItem.quantity), 0))) or 0)
@@ -63,5 +70,11 @@ def render_metrics(db: Session) -> bytes:
         select(PriceObservation.provider, func.count(PriceObservation.id)).group_by(PriceObservation.provider)
     ):
         price_observations_total.labels(provider=provider).set(count)
+
+    list_buildability, _ = compute_list_buildability(db)
+    for lb in list_buildability:
+        list_coverage_percent.labels(
+            list_id=str(lb.list_id), list_name=lb.name, list_type=lb.list_type
+        ).set(lb.coverage_percent)
 
     return generate_latest(registry)

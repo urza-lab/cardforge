@@ -59,6 +59,7 @@ def _clean_db():
         db.execute(text("DELETE FROM card_lists"))
         db.execute(text("DELETE FROM price_profiles"))
         db.execute(text("DELETE FROM popular_decks"))
+        db.execute(text("DELETE FROM edhrec_synthesized_decks"))
         # price_observations isn't listed separately - it cascades away with
         # scryfall_cards below regardless of provider (manual/mtgjson rows
         # included), same as collection/list items' resolved_scryfall_card_id.
@@ -77,6 +78,12 @@ def _clean_db():
         )
         db.execute(
             text(
+                "UPDATE edhrec_sync_state SET status = 'NOT_STARTED', started_at = NULL, "
+                "finished_at = NULL, deck_count = 0, error_message = NULL WHERE id = 1"
+            )
+        )
+        db.execute(
+            text(
                 "UPDATE scryfall_sync_state SET status = 'NOT_STARTED', bulk_data_type = 'all_cards', "
                 "source_updated_at = NULL, started_at = NULL, finished_at = NULL, card_count = 0, "
                 "error_message = NULL WHERE id = 1"
@@ -85,7 +92,7 @@ def _clean_db():
         db.execute(
             text(
                 "UPDATE user_settings SET default_comparison_mode = 'oracle', preferred_currency = 'USD', "
-                "card_name_language = NULL WHERE user_id = 1"
+                "card_name_language = NULL, grafana_embed_url = NULL WHERE user_id = 1"
             )
         )
         db.commit()

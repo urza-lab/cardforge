@@ -7,6 +7,7 @@
     "lists": "Decks & Cubes",
     "listsImport": "Import Lists",
     "discover": "Discover Decks",
+    "edhrec": "EDHREC Commanders",
     "comparisons": "Comparisons",
     "sources": "Sources",
     "prices": "Prices",
@@ -190,7 +191,7 @@
     "columns": { "provider": "Source", "status": "Status" }
   },
   "discoverPage": {
-    "intro": "Real popular Commander decks from Moxfield's own public rankings (by views or likes) — browse, then import one with a click instead of hunting for a URL yourself. Cached locally; hit \"Sync now\" to refresh the list.",
+    "intro": "Real popular Commander decks from Moxfield's and Archidekt's own public rankings (by views or likes) — browse, then import one with a click instead of hunting for a URL yourself. Cached locally; hit \"Sync now\" to refresh the list.",
     "status": {
       "NOT_STARTED": "Not synced yet",
       "FETCHING": "Syncing…",
@@ -200,15 +201,42 @@
     "cachedDecks": "Cached decks",
     "syncNow": "Sync now",
     "syncing": "Syncing…",
+    "source": "Source",
+    "sourceAll": "All sources",
+    "sourceMoxfield": "Moxfield",
+    "sourceArchidekt": "Archidekt",
     "sortBy": "Sort by",
     "sortViews": "Most viewed",
     "sortLikes": "Most liked",
     "colorFilter": "Color identity",
     "empty": "No popular decks cached yet — click \"Sync now\" above.",
-    "columns": { "author": "Author", "colors": "Colors", "views": "Views", "likes": "Likes" },
+    "columns": { "source": "Source", "author": "Author", "colors": "Colors", "views": "Views", "likes": "Likes" },
     "import": "Import",
     "importFailed": "Import failed",
-    "viewList": "View list"
+    "viewList": "View list",
+    "selectAll": "Select all",
+    "bulkImport_one": "Import {{count}} selected",
+    "bulkImport_other": "Import {{count}} selected",
+    "bulkImporting": "Importing {{done}} / {{total}}…"
+  },
+  "edhrecPage": {
+    "intro": "For each of EDHREC's real top 100 Commander picks (by its own popularity ranking), a decklist is synthesized from that commander's real average deck composition and most-played cards — not a decklist any single person built.",
+    "disclaimer": "These decks are computed, not real — EDHREC has no hosted decklists to browse, only card-recommendation statistics per commander. Each one picks the most-played cards per category up to that commander's typical real card-type counts (e.g. \"24 creatures, 35 lands\"). Treat it as a reasonable starting point, not a deck anyone actually plays as-is.",
+    "status": {
+      "NOT_STARTED": "Not synced yet",
+      "FETCHING": "Syncing…",
+      "CURRENT": "Up to date",
+      "FAILED": "Sync failed"
+    },
+    "cachedDecks": "Cached decks",
+    "syncNow": "Sync now",
+    "syncing": "Syncing… (can take a minute — up to 100 real page fetches)",
+    "sortBy": "Sort by",
+    "sortPopularity": "Most popular commander",
+    "sortRank": "EDHREC rank",
+    "colorFilter": "Color identity",
+    "empty": "No synthesized decks cached yet — click \"Sync now\" above.",
+    "columns": { "commander": "Commander", "numDecks": "Real decks on EDHREC", "cardCount": "Cards" }
   },
   "pricesPage": {
     "mtgjson": {
@@ -252,7 +280,9 @@
     "cardNameLanguage": "Force card name language",
     "cardNameLanguageAuto": "Auto (per card, as imported)",
     "cardNameLanguages": { "de": "German", "en": "English" },
-    "cardNameLanguageHint": "By default, each card's name is shown in the language recorded for it on import. Forcing a language here shows every card in that language where a localized name is available, falling back to English otherwise."
+    "cardNameLanguageHint": "By default, each card's name is shown in the language recorded for it on import. Forcing a language here shows every card in that language where a localized name is available, falling back to English otherwise.",
+    "grafanaEmbedUrl": "Grafana embed URL",
+    "grafanaEmbedUrlHint": "Optional. Paste a Grafana \"Public Dashboard\" link (Share → Public dashboard, on the \"CardForge — High-Coverage Decks\" dashboard) to embed it on the Dashboard page below. Leave empty to hide that panel."
   },
   "dashboardPage": {
     "collection": "Collection",
@@ -270,6 +300,10 @@
       "quantityNeeded": "Copies needed",
       "listsNewlyBuildable": "Lists newly buildable",
       "coverageGain": "Total coverage gain"
+    },
+    "grafana": {
+      "title": "High-coverage decks (Grafana)",
+      "notConfigured": "Not set up yet — paste a Grafana Public Dashboard link in"
     }
   },
   "common": {

@@ -7,16 +7,39 @@ standalone type.
 """
 from __future__ import annotations
 
+import time
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
+
 from app.parsers.common import ParsedRow, ParseResult
 from app.security.ssrf_guard import AuthRequiredError, guarded_get
-from app.source_adapters.common import DeckFetchResult
+from app.source_adapters.common import DeckFetchResult, PopularDeckEntry
 from app.source_adapters.errors import InvalidUrlError, SourceFetchError
 
 SOURCE_NAME = "archidekt"
 API_BASE = "https://archidekt.com/api/decks"
+
+# Real public search API archidekt.com/search/decks uses - found by scraping
+# that page's own HTML for embedded API paths (not documented anywhere), then
+# verified live: `orderBy=-viewCount` returns real, plausible-looking view
+# counts (up to ~400k on the most-viewed deck seen during research);
+# -points/-favorites/-likes all looked unreliable (returned tiny 5-14 card
+# decks, suggesting a silent fallback to an unfiltered/default order rather
+# than actually honoring the sort) so only -viewCount is used here. The API
+# ignores pageSize/size/limit params entirely and always returns 60 results
+# per page - confirmed live, not documented. `formats=3` is Commander/EDH -
+# confirmed live by every result having `deckFormat: 3` and `size: 100`
+# (99 + commander). No login/API key needed for this public search.
+SEARCH_API = "https://archidekt.com/api/decks/v3/"
+POPULAR_DECKS_PAGE_SIZE = 60  # fixed by the API - not configurable, see above
+POPULAR_DECKS_PAGES = 5  # 5 x 60 = up to 300 decks
+COMMANDER_FORMAT_ID = 3
+# No 429 observed even firing 8 requests back-to-back during research, but a
+# small delay keeps this respectful of Archidekt's servers the same way the
+# Moxfield sync is (see app.source_adapters.moxfield's own delay constant).
+POPULAR_DECKS_REQUEST_DELAY_SECONDS = 0.5
 
 # Archidekt decks carry a free-form list of user-defined "categories" per
 # card, not a fixed board enum - only a few names are Archidekt's own
@@ -113,3 +136,56 @@ def _map_entry(row_number: int, entry: dict[str, Any]) -> ParsedRow:
 
 def attribution(deck_url: str) -> str:
     return f"Imported from Archidekt: {deck_url}"
+
+
+def fetch_popular_decks(user_agent: str, *, fmt: int = COMMANDER_FORMAT_ID) -> list[PopularDeckEntry]:
+    """Real public data from Archidekt's own search - see SEARCH_API above
+    for what's actually confirmed to work. Unlike Moxfield, only one sort
+    (view count) is trustworthy, so this doesn't merge multiple sorts - see
+    app.source_adapters.moxfield.fetch_popular_decks for that pattern.
+    """
+    headers = {"User-Agent": user_agent, "Accept": "application/json"}
+    by_id: dict[str, PopularDeckEntry] = {}
+
+    for page in range(1, POPULAR_DECKS_PAGES + 1):
+        if page > 1:
+            time.sleep(POPULAR_DECKS_REQUEST_DELAY_SECONDS)
+
+        resp = httpx.get(
+            SEARCH_API,
+            params={"formats": fmt, "orderBy": "-viewCount", "page": page},
+            headers=headers,
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            raise SourceFetchError(f"Archidekt popular-decks search returned HTTP {resp.status_code} (page={page})")
+
+        results = resp.json().get("results", [])
+        if not results:
+            break
+
+        for entry in results:
+            deck_id = entry.get("id")
+            if deck_id is None:
+                continue
+            external_id = str(deck_id)
+            colors = entry.get("colors") or {}
+            # Percentage-of-cards-per-color, not a true commander color
+            # identity - the closest real signal this API exposes; used the
+            # same way (subset-match filtering) as Moxfield's real
+            # colorIdentity, see app.services.discover_service.
+            color_identity = [c for c in ("W", "U", "B", "R", "G") if (colors.get(c) or 0) > 0]
+            by_id[external_id] = PopularDeckEntry(
+                external_id=external_id,
+                name=entry.get("name") or "(untitled)",
+                author=(entry.get("owner") or {}).get("username"),
+                source_url=f"https://archidekt.com/decks/{deck_id}",
+                format="commander",
+                view_count=entry.get("viewCount") or 0,
+                # No reliable likes/points signal was found on this API (see
+                # SEARCH_API note above) - 0 rather than a fabricated number.
+                like_count=0,
+                color_identity=color_identity,
+            )
+
+    return list(by_id.values())

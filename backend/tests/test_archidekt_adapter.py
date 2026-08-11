@@ -112,3 +112,53 @@ def test_fetch_and_parse_missing_cards_list_is_source_fetch_error(monkeypatch: p
     monkeypatch.setattr(archidekt, "guarded_get", lambda url, **kwargs: _response(200, {"id": 1}))
     with pytest.raises(SourceFetchError):
         archidekt.fetch_and_parse("https://archidekt.com/decks/1/x", user_agent="test-agent")
+
+
+def _search_response(results: list[dict[str, object]]) -> httpx.Response:
+    request = httpx.Request("GET", "https://archidekt.com/api/decks/v3/")
+    return httpx.Response(200, content=json.dumps({"count": len(results), "next": None, "results": results}), request=request)
+
+
+def test_fetch_popular_decks_paginates_and_dedupes(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(archidekt.time, "sleep", lambda *_: None)
+    calls: list[dict[str, object]] = []
+
+    real_deck = {
+        "id": 111, "name": "Real Deck", "owner": {"username": "Alice"},
+        "viewCount": 5000, "colors": {"W": 10, "U": 20, "B": 0, "R": 0, "G": 0},
+    }
+
+    def fake_get(url: str, params: dict[str, object], headers: dict[str, str], timeout: float) -> httpx.Response:
+        calls.append(dict(params))
+        page = params["page"]
+        if page == 1:
+            return _search_response([real_deck])
+        if page == 2:
+            return _search_response([real_deck])  # same deck again - must dedupe
+        return _search_response([])  # empty page - fetch stops early
+
+    monkeypatch.setattr(archidekt.httpx, "get", fake_get)
+
+    decks = archidekt.fetch_popular_decks("test-agent")
+
+    assert len(calls) == 3  # stops as soon as an empty page is seen
+    assert len(decks) == 1
+    deck = decks[0]
+    assert deck.external_id == "111"
+    assert deck.name == "Real Deck"
+    assert deck.author == "Alice"
+    assert deck.source_url == "https://archidekt.com/decks/111"
+    assert deck.view_count == 5000
+    assert deck.like_count == 0
+    assert deck.color_identity == ["W", "U"]
+
+
+def test_fetch_popular_decks_raises_on_non_200(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(archidekt.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(
+        archidekt.httpx,
+        "get",
+        lambda url, params, headers, timeout: httpx.Response(500, request=httpx.Request("GET", url)),
+    )
+    with pytest.raises(SourceFetchError):
+        archidekt.fetch_popular_decks("test-agent")

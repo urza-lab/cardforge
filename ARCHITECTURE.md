@@ -477,6 +477,40 @@ be decided without blocking implementation. All are changeable later.
   scrape (a pull-based exporter, not counters incremented during request
   handling) — see PRICING.md-style "no fake success": nothing here is
   hardcoded or estimated.
+- **A Grafana panel embedded in the CardForge Dashboard page, user-
+  requested (post-Phase-7), uses Grafana's own "Public Dashboard" sharing
+  rather than blanket anonymous access:** a new `cardforge_list_coverage_
+  percent{list_id,list_name,list_type}` gauge (`app/metrics/
+  prometheus_exporter.py`) feeds a dedicated Grafana dashboard/panel
+  (`grafana/dashboards/cardforge-high-coverage.json`, table view sorted by
+  coverage %, with a clickable data link back to each deck/cube's CardForge
+  page). Presented as a real security fork to the user rather than assumed:
+  `GF_AUTH_ANONYMOUS_ENABLED` would make *all* of Grafana's dashboards
+  viewable without login; Grafana's built-in "Public Dashboards" feature
+  (confirmed live on the pinned `grafana-oss:11.4.0` via its API) shares
+  exactly one dashboard behind an unguessable token URL, leaving everything
+  else password-protected — chosen as the narrower, equally-simple option.
+  Given the whole stack is already only reachable on the user's own trusted
+  network with no login on the main app either, the *marginal* risk was
+  judged small either way, but there was no reason to pick the broader
+  option when the narrower one costs the same. Public-dashboard shares have
+  no file-based provisioning API in Grafana OSS (unlike datasources/
+  dashboards, which do) — the share link is generated once via Grafana's
+  own HTTP API (or its Share UI) and pasted into `UserSettings.
+  grafana_embed_url` (Settings page), which the Dashboard page then iframes
+  if set, or shows a setup hint if not. `GF_SECURITY_ALLOW_EMBEDDING=true`
+  is required separately — Grafana denies all iframe framing by default
+  regardless of the public-dashboard setting, a different, narrower "can
+  this be framed at all" decision from "is login required."
+- **Found and fixed while wiring the embed above: Grafana's `GF_SERVER_
+  ROOT_URL`/`GF_SERVER_SERVE_FROM_SUB_PATH` were pre-set (Phase 7) for a
+  future nginx `/grafana/` reverse-proxy path that was never actually
+  built** (`frontend/nginx.conf` has no such location - Grafana has only
+  ever been reached directly on its own `GRAFANA_HOST_PORT`). With
+  `serve_from_sub_path` on, Grafana 301-redirected every direct request
+  (including the new embed's own URL) to that nonexistent sub-path, which
+  then had nowhere to go. Removed both settings — Grafana now uses its own
+  defaults, matching how it's actually deployed here.
 - **Grafana/Prometheus data directories needed the same root-owned-
   bind-mount fix as `./data/secrets`/`./data/scryfall_cache`** (Phase 7,
   `backend/scripts/init_secrets.py`): `prom/prometheus` runs as a fixed
@@ -489,34 +523,74 @@ be decided without blocking implementation. All are changeable later.
   since nothing but the grafana container itself ever reads that file.
 - **Popular-deck discovery (post-Phase-7, user-requested) is a local cache
   synced on demand, never a live query per browse request** (`app/models/
-  discover.py` `PopularDeck`, `app/source_adapters/moxfield.py`
-  `run_deck_discovery_sync`): the same FETCHING/CURRENT/FAILED sync-job
-  shape as Scryfall/MTGJSON, for the same reason — Moxfield's real search
-  API rate-limited this project (HTTP 429) after a burst of unpaced
-  requests during development, so hitting it live on every page view would
-  be both slow for the user and unfriendly to Moxfield's servers. The sync
-  itself paces its own handful of requests with a fixed delay
-  (`POPULAR_DECKS_REQUEST_DELAY_SECONDS`) rather than firing them all at
-  once.
+  discover.py` `PopularDeck`, `app/services/discover_service.py`
+  `run_discovery_sync`): the same FETCHING/CURRENT/FAILED sync-job shape as
+  Scryfall/MTGJSON, for the same reason — Moxfield's real search API
+  rate-limited this project (HTTP 429) after a burst of unpaced requests
+  during development, so hitting it live on every page view would be both
+  slow for the user and unfriendly to the source's servers. Each source
+  paces its own handful of requests with a fixed delay
+  (`POPULAR_DECKS_REQUEST_DELAY_SECONDS` in each of `moxfield.py`/
+  `archidekt.py`) rather than firing them all at once.
+- **A second source (Archidekt) was added later, and an earlier "Archidekt
+  needs auth" conclusion turned out to be wrong, not a hard fact:** the
+  original discovery work only tried Archidekt's authenticated `/api/decks/
+  v2/` endpoint, got a 401, and stopped there. The real public search API
+  (`/api/decks/v3/`) was only found later by scraping archidekt.com's own
+  search page HTML for embedded API paths — a reminder that a quick 401 on
+  one guessed endpoint isn't proof a public API doesn't exist elsewhere.
+  Each source is fully independent in `discover_service._SOURCES`: one
+  source failing a sync (e.g. Moxfield rate-limiting again) doesn't lose or
+  block the other's decks — `run_discovery_sync` only reports FAILED if
+  every source failed that run, and records a partial-failure message in
+  `error_message` otherwise rather than hiding it (still "no fake success":
+  a real partial failure stays visible, it's just not conflated with a
+  total outage).
 - **Decks only, no cubes, in the popular-deck browser — a deliberate scope
-  cut, not a gap nobody noticed:** Moxfield's public deck-search API has no
-  `cube` format value, and no separate public cube-search endpoint was
-  found either (a couple of guessed URLs both 404'd). Presented as an
-  explicit choice rather than assumed: build decks now with real verified
-  data, or hold off building anything and research further, or ship cubes
-  anyway with worse data quality. "Decks now" was chosen — see
-  SOURCE_ADAPTERS.md for the two paths not taken (a Moxfield cube API that
-  may not exist publicly; a new, unverified CubeCobra adapter).
-- **One-click "import" reuses the existing URL-import pipeline wholesale —
-  no new import/parsing logic was written for deck discovery at all:** a
-  cached `PopularDeck.source_url` is a real `moxfield.com/decks/...` URL,
-  so "import this" is just `POST /api/lists` (create) →
+  cut, not a gap nobody noticed:** neither Moxfield's nor Archidekt's public
+  deck-search API has a cube format value, and no separate public
+  cube-search endpoint was found for either. Presented as an explicit
+  choice rather than assumed: build decks now with real verified data, or
+  hold off building anything and research further, or ship cubes anyway
+  with worse data quality. "Decks now" was chosen — see SOURCE_ADAPTERS.md
+  for the paths not taken (a cube-search API that may not exist publicly on
+  either site; a new, unverified CubeCobra adapter).
+- **One-click "import" (single or bulk) reuses the existing URL-import
+  pipeline wholesale — no new import/parsing logic was written for deck
+  discovery at all:** a cached `PopularDeck.source_url` is a real deck URL
+  on its own source, so "import this" is just `POST /api/lists` (create) →
   `POST /api/list-imports/preview-url` → `POST /api/list-imports/{id}/
   confirm` — the exact same three calls the "Import Lists → From a URL"
-  flow already makes (Phase 5). The imported list also comes out with
-  `source_url`/`source_type` set, so it's refreshable through the existing
-  Phase 5 refresh system for free, with no discovery-specific code needed
-  for that either.
+  flow already makes (Phase 5). Bulk import (checkbox-select + "select all",
+  user-requested) is purely a frontend loop over that same three-call
+  sequence per selected deck, sequential rather than parallel (keeps
+  request pacing predictable and per-deck progress easy to show) — no
+  backend endpoint or schema change was needed for it. The imported list
+  also comes out with `source_url`/`source_type` set either way, so it's
+  refreshable through the existing Phase 5 refresh system for free, with no
+  discovery-specific code needed for that either.
+- **EDHREC synthesized decks are a separate model, sync, and frontend tab
+  from Moxfield/Archidekt discovery — not a third row in the same
+  `PopularDeck` table, on purpose:** a `PopularDeck` row is always a real
+  decklist someone else built, with a real URL that's independently
+  refreshable; a `SynthesizedDeck` (`app/models/edhrec.py`) is computed by
+  this app itself from EDHREC's real per-commander statistics (most-played
+  cards per category, picked up to that commander's own real average
+  card-type counts) - there's no author, no source decklist, and no URL to
+  refresh from later (the decklist text is generated once at sync time and
+  stored directly). Folding a fundamentally different kind of "deck" into
+  the same list under a same-looking badge would blur a distinction users
+  need to make correctly (would I actually build this, vs. does someone
+  really play this) - presented as a real fork with real tradeoffs, user
+  chose the separate tab over mixing sources.
+- **EDHREC's page-scrape reuses the *upload* import entry point
+  (`POST /api/list-imports/preview`), not the URL one:** Moxfield/Archidekt
+  discovery imports work by handing the cached `source_url` straight to the
+  existing `preview-url` endpoint, which fetches it again at import time.
+  EDHREC has no analogous URL to fetch a decklist from — the deck was
+  already synthesized and stored as plain text at sync time — so import
+  just sends that stored text through the exact same upload path a manually
+  pasted text list already uses, with zero new backend import/parsing code.
 - **The color-identity filter is a subset match, not an exact match**
   (`app/services/discover_service.py` `list_popular_decks`): filtering by
   "WU" also returns a mono-W or mono-U deck, not only decks whose identity

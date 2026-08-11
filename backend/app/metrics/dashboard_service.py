@@ -59,17 +59,16 @@ class DashboardSummary:
     top_leverage: list[LeverageCandidate] = field(default_factory=list)
 
 
-def get_dashboard_summary(db: Session, user_id: int = DEFAULT_USER_ID) -> DashboardSummary:
+def compute_list_buildability(
+    db: Session, *, user_id: int = DEFAULT_USER_ID
+) -> tuple[list[ListBuildability], dict[int, list[RequiredCard]]]:
+    """Split out of `get_dashboard_summary` so callers that only need
+    per-list coverage (the Prometheus exporter) don't also pay for the
+    leverage computation below, which is meaningfully more expensive
+    (O(candidates x lists), see `app.comparison.leverage`) and would
+    otherwise run on every Prometheus scrape for no reason.
+    """
     collection = collection_service.get_or_create_default_collection(db, user_id=user_id)
-
-    distinct_items, total_quantity, resolved_count = db.execute(
-        select(
-            func.count(CollectionItem.id),
-            func.coalesce(func.sum(CollectionItem.quantity), 0),
-            func.count(CollectionItem.id).filter(CollectionItem.resolved_oracle_id.is_not(None)),
-        ).where(CollectionItem.collection_id == collection.id)
-    ).one()
-
     lists = list(db.scalars(select(CardList).where(CardList.user_id == user_id)))
     owned = _owned_cards(db, collection.id)
     settings = ComparisonSettings(mode="oracle")
@@ -89,6 +88,23 @@ def get_dashboard_summary(db: Session, user_id: int = DEFAULT_USER_ID) -> Dashbo
                 is_fully_buildable=result.is_fully_buildable,
             )
         )
+    return list_buildability, lists_required
+
+
+def get_dashboard_summary(db: Session, user_id: int = DEFAULT_USER_ID) -> DashboardSummary:
+    collection = collection_service.get_or_create_default_collection(db, user_id=user_id)
+
+    distinct_items, total_quantity, resolved_count = db.execute(
+        select(
+            func.count(CollectionItem.id),
+            func.coalesce(func.sum(CollectionItem.quantity), 0),
+            func.count(CollectionItem.id).filter(CollectionItem.resolved_oracle_id.is_not(None)),
+        ).where(CollectionItem.collection_id == collection.id)
+    ).one()
+
+    owned = _owned_cards(db, collection.id)
+    settings = ComparisonSettings(mode="oracle")
+    list_buildability, lists_required = compute_list_buildability(db, user_id=user_id)
 
     lists_fully_buildable = sum(1 for lb in list_buildability if lb.is_fully_buildable)
     average_coverage = (
@@ -105,7 +121,7 @@ def get_dashboard_summary(db: Session, user_id: int = DEFAULT_USER_ID) -> Dashbo
         collection_distinct_items=distinct_items,
         collection_total_quantity=int(total_quantity),
         collection_resolved_count=resolved_count,
-        list_count=len(lists),
+        list_count=len(list_buildability),
         lists_fully_buildable=lists_fully_buildable,
         average_coverage_percent=average_coverage,
         scryfall_sync_status=scryfall_state.status if scryfall_state else "NOT_STARTED",

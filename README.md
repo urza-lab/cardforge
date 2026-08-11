@@ -19,9 +19,17 @@ pricing and refresh step is deterministic and reproducible.
   something is.
 - A native dashboard shows collection/deck stats at a glance, plus an
   optional real Grafana + Prometheus setup for deeper metrics history.
-- Browse real popular Commander decks (ranked by Moxfield's own view/like
-  counts) and import one against your collection with a single click,
-  instead of hunting down a decklist URL yourself.
+- Browse real popular Commander decks (ranked by Moxfield's and Archidekt's
+  own view/like counts) and import one — or several at once — against your
+  collection with a click, instead of hunting down decklist URLs yourself.
+- A separate EDHREC tab synthesizes an "average deck" for each of EDHREC's
+  own real top 100 Commander picks, built from that commander's real
+  most-played cards and typical card-type counts — clearly labeled as
+  computed, not an actual decklist someone built, but still importable and
+  comparable the same way.
+- The optional Grafana stack can embed a "highest-coverage decks" panel
+  directly on the Dashboard page (via Grafana's own Public Dashboard
+  sharing, scoped to just that one panel) — see `ARCHITECTURE.md`.
 
 ## Why no AI
 

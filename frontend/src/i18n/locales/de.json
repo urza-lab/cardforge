@@ -7,6 +7,7 @@
     "lists": "Decks & Cubes",
     "listsImport": "Listen importieren",
     "discover": "Decks entdecken",
+    "edhrec": "EDHREC Commander",
     "comparisons": "Vergleiche",
     "sources": "Quellen",
     "prices": "Preise",
@@ -190,7 +191,7 @@
     "columns": { "provider": "Quelle", "status": "Status" }
   },
   "discoverPage": {
-    "intro": "Echte populäre Commander-Decks aus Moxfields eigenen öffentlichen Ranglisten (nach Views oder Likes) — durchsuchen und mit einem Klick importieren, statt selbst nach einer URL zu suchen. Lokal zwischengespeichert; \"Jetzt synchronisieren\" aktualisiert die Liste.",
+    "intro": "Echte populäre Commander-Decks aus Moxfields und Archidekts eigenen öffentlichen Ranglisten (nach Views oder Likes) — durchsuchen und mit einem Klick importieren, statt selbst nach einer URL zu suchen. Lokal zwischengespeichert; \"Jetzt synchronisieren\" aktualisiert die Liste.",
     "status": {
       "NOT_STARTED": "Noch nicht synchronisiert",
       "FETCHING": "Synchronisiert…",
@@ -200,15 +201,42 @@
     "cachedDecks": "Zwischengespeicherte Decks",
     "syncNow": "Jetzt synchronisieren",
     "syncing": "Synchronisiert…",
+    "source": "Quelle",
+    "sourceAll": "Alle Quellen",
+    "sourceMoxfield": "Moxfield",
+    "sourceArchidekt": "Archidekt",
     "sortBy": "Sortieren nach",
     "sortViews": "Meiste Views",
     "sortLikes": "Meiste Likes",
     "colorFilter": "Farbidentität",
     "empty": "Noch keine populären Decks zwischengespeichert — klicke oben auf \"Jetzt synchronisieren\".",
-    "columns": { "author": "Autor", "colors": "Farben", "views": "Views", "likes": "Likes" },
+    "columns": { "source": "Quelle", "author": "Autor", "colors": "Farben", "views": "Views", "likes": "Likes" },
     "import": "Importieren",
     "importFailed": "Import fehlgeschlagen",
-    "viewList": "Liste ansehen"
+    "viewList": "Liste ansehen",
+    "selectAll": "Alle auswählen",
+    "bulkImport_one": "{{count}} ausgewählte importieren",
+    "bulkImport_other": "{{count}} ausgewählte importieren",
+    "bulkImporting": "Importiere {{done}} / {{total}}…"
+  },
+  "edhrecPage": {
+    "intro": "Für jeden der 100 populärsten Commander laut EDHREC's eigener Rangliste wird aus dessen realer durchschnittlicher Deck-Zusammensetzung und den meistgespielten Karten eine Decklist zusammengestellt — keine Liste, die eine einzelne Person tatsächlich gebaut hat.",
+    "disclaimer": "Diese Decks sind berechnet, nicht real — EDHREC hat keine hinterlegten Decklisten zum Durchsuchen, nur Karten-Empfehlungsstatistiken pro Commander. Jedes Deck nimmt die meistgespielten Karten pro Kategorie bis zur typischen realen Kartentyp-Anzahl dieses Commanders (z.B. \"24 Kreaturen, 35 Länder\"). Als sinnvoller Ausgangspunkt zu verstehen, nicht als Deck, das jemand tatsächlich so spielt.",
+    "status": {
+      "NOT_STARTED": "Noch nicht synchronisiert",
+      "FETCHING": "Synchronisiert…",
+      "CURRENT": "Aktuell",
+      "FAILED": "Synchronisierung fehlgeschlagen"
+    },
+    "cachedDecks": "Zwischengespeicherte Decks",
+    "syncNow": "Jetzt synchronisieren",
+    "syncing": "Synchronisiert… (kann eine Minute dauern — bis zu 100 echte Seitenabrufe)",
+    "sortBy": "Sortieren nach",
+    "sortPopularity": "Populärster Commander",
+    "sortRank": "EDHREC-Rang",
+    "colorFilter": "Farbidentität",
+    "empty": "Noch keine synthetisierten Decks zwischengespeichert — klicke oben auf \"Jetzt synchronisieren\".",
+    "columns": { "commander": "Commander", "numDecks": "Echte Decks auf EDHREC", "cardCount": "Karten" }
   },
   "pricesPage": {
     "mtgjson": {
@@ -252,7 +280,9 @@
     "cardNameLanguage": "Kartennamen-Sprache erzwingen",
     "cardNameLanguageAuto": "Automatisch (pro Karte, wie importiert)",
     "cardNameLanguages": { "de": "Deutsch", "en": "Englisch" },
-    "cardNameLanguageHint": "Standardmäßig wird jede Karte in der beim Import erfassten Sprache angezeigt. Erzwingst du hier eine Sprache, werden alle Karten in dieser Sprache angezeigt, sofern ein lokalisierter Name vorhanden ist — sonst auf Englisch."
+    "cardNameLanguageHint": "Standardmäßig wird jede Karte in der beim Import erfassten Sprache angezeigt. Erzwingst du hier eine Sprache, werden alle Karten in dieser Sprache angezeigt, sofern ein lokalisierter Name vorhanden ist — sonst auf Englisch.",
+    "grafanaEmbedUrl": "Grafana-Einbettungs-URL",
+    "grafanaEmbedUrlHint": "Optional. Füge hier einen Grafana-\"Public Dashboard\"-Link ein (Share → Public dashboard, beim Dashboard \"CardForge — High-Coverage Decks\"), um es unten auf der Dashboard-Seite einzubetten. Leer lassen, um dieses Panel auszublenden."
   },
   "dashboardPage": {
     "collection": "Sammlung",
@@ -270,6 +300,10 @@
       "quantityNeeded": "Benötigte Exemplare",
       "listsNewlyBuildable": "Neu baubare Listen",
       "coverageGain": "Gesamter Abdeckungsgewinn"
+    },
+    "grafana": {
+      "title": "Decks mit hoher Coverage (Grafana)",
+      "notConfigured": "Noch nicht eingerichtet — Grafana-Public-Dashboard-Link einfügen unter"
     }
   },
   "common": {
