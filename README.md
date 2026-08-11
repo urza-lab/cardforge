@@ -64,10 +64,11 @@ fixed amount of money would buy toward completing a deck or cube — see
 `PRICING.md`. A native Dashboard page shows collection/deck stats and a
 "what to buy next" collection-leverage ranking (which missing card would
 complete the most decks/cubes), and an optional Grafana + Prometheus stack
-(`docker compose --profile observability up -d`, off by default) reads
-real metrics from the backend's `/metrics` endpoint — see `ARCHITECTURE.md`
-"Documented default decisions" for how leverage is computed and what the
-exporter reports.
+(`docker compose --profile observability up -d`, off by default — set
+`COMPOSE_PROFILES=observability` in `.env` to start it automatically on
+every `docker compose up` instead) reads real metrics from the backend's
+`/metrics` endpoint — see `ARCHITECTURE.md` "Documented default decisions"
+for how leverage is computed and what the exporter reports.
 
 ## Quick start
 

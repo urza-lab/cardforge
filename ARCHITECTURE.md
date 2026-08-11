@@ -501,7 +501,17 @@ be decided without blocking implementation. All are changeable later.
   if set, or shows a setup hint if not. `GF_SECURITY_ALLOW_EMBEDDING=true`
   is required separately — Grafana denies all iframe framing by default
   regardless of the public-dashboard setting, a different, narrower "can
-  this be framed at all" decision from "is login required."
+  this be framed at all" decision from "is login required." The embed being
+  actually useful depends on the observability stack running, which is
+  off by default (`profiles: ["observability"]`) — since the whole point of
+  this feature is an always-there panel on the Dashboard page, not a
+  once-in-a-while opt-in view, `COMPOSE_PROFILES=observability` in `.env`
+  (documented in `.env.example` and README.md) starts it automatically on
+  every `docker compose up` for a deployment that wants it, without
+  changing the shipped default for anyone else cloning the repo. Combined
+  with grafana/prometheus's existing `restart: unless-stopped`, once
+  started this way they also come back on their own after a host/Docker
+  reboot with no compose command needed at all.
 - **Found and fixed while wiring the embed above: Grafana's `GF_SERVER_
   ROOT_URL`/`GF_SERVER_SERVE_FROM_SUB_PATH` were pre-set (Phase 7) for a
   future nginx `/grafana/` reverse-proxy path that was never actually
