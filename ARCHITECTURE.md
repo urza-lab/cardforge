@@ -756,6 +756,83 @@ be decided without blocking implementation. All are changeable later.
   down to ~0.9ms index scan) and the declarative-model ordering gotcha it
   ran into along the way (`__table_args__` referencing `func.lower(col)`
   has to come after that column's own definition in the class body).
+- **"Best coverage" (user-requested: rank real decks/cubes by how much of
+  each you already own) is built as its own MTGJSON-precon source rather
+  than added to `PopularDeck`/`PopularCube`/`SynthesizedDeck`** - those
+  three only ever cache *metadata* (name/views/likes), never a deck's full
+  card list, for the structural reason already documented above (no bulk
+  "many decks' contents at once" endpoint on Moxfield/Archidekt/CubeCobra,
+  only bulk search) - so ranking *them* by real coverage would mean a
+  per-deck fetch at read time, the same rate-limit/goodwill risk already
+  ruled out for lazy pricing. MTGJSON's bulk deck endpoints
+  (`DeckList.json` + per-deck `decks/{fileName}.json`, see
+  SOURCE_ADAPTERS.md) sidestep that entirely: each of the real 190
+  official Commander precons' *complete* card list, with an exact
+  `scryfallOracleId` per card, is fetched once at sync time and cached
+  whole - so real buildability coverage against the user's collection can
+  be computed live, for every cached deck, on every page load
+  (`app.services.precon_service.list_precon_decks_with_coverage`, via the
+  pure `app.comparison.engine.compare()` - no per-deck DB round-trip, let
+  alone an external fetch). This is also why it's a materially different
+  answer from EDHREC's synthesized decks (an *average* deck, not a real
+  one MTGJSON/WotC actually printed) and gets its own "Best Coverage" tab
+  rather than folding into either existing tab.
+- **User pushed back on scope before approving the build**: 190 real
+  decks was flagged as "eher spärlich" (rather sparse) and the user asked
+  whether a bigger source existed (specifically: unofficial Moxfield/
+  Archidekt scrape dumps) before committing to MTGJSON as the answer.
+  Researched live rather than assumed: no Kaggle/HuggingFace dataset of
+  either site's decks was found; mtgdecks.net's listing pages are
+  scrapeable but individual deck pages are genuinely Cloudflare-protected
+  (a real `_cf_chl_opt` JS challenge, confirmed live) - ruled out per this
+  project's own rule against bypassing access controls, not a difficulty
+  judgment call. cedh-decklist-database.com exists but is a small niche
+  site, not investigated further once the Cloudflare finding made clear no
+  *bigger* legitimate source was on the table. 190 real, exactly-resolved
+  decks remains the best available option; reported both the positive and
+  negative findings back before proceeding, rather than only the one that
+  supported building the feature.
+- **Import replays the CSV upload pipeline, like EDHREC's `deck_text` -
+  not the URL-import pipeline CubeCobra/Moxfield/Archidekt use**: MTGJSON
+  isn't a deck-hosting site with a per-deck URL to fetch-and-parse from at
+  import time, so `PreconDeck.deck_text` is a ready-made CSV (`name,
+  quantity,scryfall_id,section`, built with Python's `csv` module for safe
+  quoting) sent through the existing `source_type="csv"` upload preview/
+  confirm flow - verified live with a real 95-row, 0-error import of
+  "Urza's Iron Alliance" (100 total cards; 95 distinct CSV lines because
+  a few entries have quantity > 1).
+- **Lazy pricing (user-requested, the deferred half of the bracket-filter
+  batch above) prices exactly one `PopularDeck` at a time, on an explicit
+  action, not eagerly for the whole cache** - the same structural
+  constraint already documented for "best coverage" applies here too: a
+  `PopularDeck` row only ever holds search-result metadata, so getting its
+  real card list to price means a real per-deck fetch to Moxfield/
+  Archidekt, and doing that for ~18,000 cached decks would be a genuine
+  rate-limit/goodwill risk on sites this project doesn't control (Moxfield
+  has already 429'd this project once at far lower volume - gotcha #23).
+  `POST /api/discover/decks/{id}/price` reuses
+  `adapter.fetch_and_parse(deck.source_url, user_agent)` - the exact same
+  call the URL-import pipeline makes - runs the result through
+  `app.comparison.engine.compare()` against the caller's collection, prices
+  the missing cards via the existing `pricing_service.price_missing_cards`
+  (Phase 6), and caches `coverage_percent`/`missing_cost`/
+  `missing_cost_currency`/`priced_at` directly on the `PopularDeck` row, so
+  a repeat page view costs nothing. Pricing is wiped back to null by the
+  table's own periodic resync (the same delete-then-reinsert every
+  `PopularDeck` row already gets) - accepted deliberately rather than
+  engineered around (unlike gotcha #19's price-observation snapshot/
+  restore): a cached deck price is a convenience value that's one click to
+  recompute, not data a user would notice or mind losing across a resync.
+- **Partial pricing is shown, not hidden, unlike `app.metrics.
+  dashboard_service.compute_list_missing_cost`'s "omit the list entirely if
+  any missing card lacks a price" rule** - that rule fits a metrics
+  exporter scraped unattended, where a silently-partial number is worse
+  than no number. Here, a human just clicked "price this deck" and is
+  looking right at the result, so a partial total is still useful:
+  `PopularDeck.unpriced_missing_count` tracks how many missing cards had no
+  resolvable price at all, and the frontend shows it next to the total
+  (e.g. "$4,227.26 (2 unpriced)") instead of a misleadingly complete-
+  looking number or nothing.
 
 ## Backend module boundaries
 

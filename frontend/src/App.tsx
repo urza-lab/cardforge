@@ -11,6 +11,7 @@ import EdhrecDecks from "./pages/EdhrecDecks";
 import ListDetail from "./pages/ListDetail";
 import Lists from "./pages/Lists";
 import ListsImport from "./pages/ListsImport";
+import PreconDecks from "./pages/PreconDecks";
 import Prices from "./pages/Prices";
 import Settings from "./pages/Settings";
 import Sources from "./pages/Sources";
@@ -25,6 +26,7 @@ const NAV_ITEMS: Array<{ to: string; key: string }> = [
   { to: "/discover", key: "nav.discover" },
   { to: "/discover-cubes", key: "nav.discoverCubes" },
   { to: "/edhrec", key: "nav.edhrec" },
+  { to: "/precons", key: "nav.precons" },
   { to: "/comparisons", key: "nav.comparisons" },
   { to: "/sources", key: "nav.sources" },
   { to: "/prices", key: "nav.prices" },
@@ -77,6 +79,7 @@ export default function App() {
           <Route path="/discover" element={<Discover />} />
           <Route path="/discover-cubes" element={<DiscoverCubes />} />
           <Route path="/edhrec" element={<EdhrecDecks />} />
+          <Route path="/precons" element={<PreconDecks />} />
           <Route path="/comparisons" element={<Comparisons />} />
           <Route path="/sources" element={<Sources />} />
           <Route path="/prices" element={<Prices />} />

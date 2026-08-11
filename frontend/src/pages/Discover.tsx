@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { apiGet, apiPostJson, ApiError } from "../api/client";
 import type { DeckDiscoverySyncStatusRead, PopularDeck } from "../types/discover";
 import type { CardList, ListImportPreview, ListImportSummary } from "../types/lists";
+import type { PriceProfile } from "../types/pricing";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -44,6 +45,10 @@ export default function Discover() {
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
 
+  const [priceProfileId, setPriceProfileId] = useState<number | null>(null);
+  const [pricingState, setPricingState] = useState<Record<number, "pricing" | "error">>({});
+  const [pricingError, setPricingError] = useState<Record<number, string>>({});
+
   const fetchStatus = useCallback(() => {
     apiGet<DeckDiscoverySyncStatusRead>("/discover/decks/status")
       .then(setStatus)
@@ -62,6 +67,17 @@ export default function Discover() {
 
   useEffect(fetchStatus, [fetchStatus]);
   useEffect(fetchDecks, [fetchDecks]);
+
+  useEffect(() => {
+    apiGet<PriceProfile[]>("/price-profiles")
+      .then((profiles) => {
+        const defaultProfile = profiles.find((p) => p.is_default) ?? profiles[0];
+        if (defaultProfile) setPriceProfileId(defaultProfile.id);
+      })
+      .catch(() => {
+        // Lazy pricing stays unavailable (button hidden) if this fails - not fatal to the page.
+      });
+  }, []);
 
   useEffect(() => {
     // The deck list just changed (new sort/filter, or a fresh sync) - drop
@@ -101,6 +117,25 @@ export default function Discover() {
     const result = await importDeck(deck);
     setImportState((s) => ({ ...s, [deck.id]: "error" in result ? "error" : "done" }));
     setImportResult((r) => ({ ...r, [deck.id]: result }));
+  }
+
+  async function handlePriceDeck(deck: PopularDeck) {
+    if (!priceProfileId) return;
+    setPricingState((s) => ({ ...s, [deck.id]: "pricing" }));
+    try {
+      const priced = await apiPostJson<PopularDeck>(`/discover/decks/${deck.id}/price`, {
+        price_profile_id: priceProfileId,
+      });
+      setDecks((prev) => (prev ? prev.map((d) => (d.id === priced.id ? priced : d)) : prev));
+      setPricingState((s) => {
+        const next = { ...s };
+        delete next[deck.id];
+        return next;
+      });
+    } catch (err) {
+      setPricingState((s) => ({ ...s, [deck.id]: "error" }));
+      setPricingError((e) => ({ ...e, [deck.id]: err instanceof ApiError ? err.message : String(err) }));
+    }
   }
 
   const selectableDecks = useMemo(
@@ -267,6 +302,7 @@ export default function Discover() {
                     <th>{t("discoverPage.columns.bracket")}</th>
                     <th>{t("discoverPage.columns.views")}</th>
                     <th>{t("discoverPage.columns.likes")}</th>
+                    <th>{t("discoverPage.columns.price")}</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -295,6 +331,36 @@ export default function Discover() {
                         <td>{deck.bracket ?? "—"}</td>
                         <td>{deck.view_count.toLocaleString()}</td>
                         <td>{deck.like_count > 0 ? deck.like_count.toLocaleString() : "—"}</td>
+                        <td>
+                          {pricingState[deck.id] === "pricing" ? (
+                            t("common.loading")
+                          ) : deck.priced_at ? (
+                            <span>
+                              {deck.coverage_percent?.toFixed(0)}% ·{" "}
+                              {deck.missing_cost !== null
+                                ? `${Number(deck.missing_cost).toFixed(2)} ${deck.missing_cost_currency}`
+                                : "—"}
+                              {!!deck.unpriced_missing_count && (
+                                <span
+                                  style={{ color: "var(--cf-muted)" }}
+                                  title={t("discoverPage.unpricedHint", { count: deck.unpriced_missing_count })}
+                                >
+                                  {" "}
+                                  ({t("discoverPage.unpricedShort", { count: deck.unpriced_missing_count })})
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            <button
+                              className="cf-btn"
+                              disabled={!priceProfileId}
+                              title={pricingState[deck.id] === "error" ? pricingError[deck.id] : undefined}
+                              onClick={() => handlePriceDeck(deck)}
+                            >
+                              {t("discoverPage.priceDeck")}
+                            </button>
+                          )}
+                        </td>
                         <td>
                           {state === "done" && result && "listId" in result ? (
                             <Link className="cf-btn" to={`/lists/${result.listId}`}>

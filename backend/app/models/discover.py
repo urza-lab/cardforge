@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import Integer, String, UniqueConstraint, func
+from sqlalchemy import Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -52,6 +53,29 @@ class PopularDeck(Base):
     # deck authors never set one - see app.source_adapters.common.PopularDeckEntry.
     bracket: Mapped[int | None] = mapped_column(Integer)
     synced_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+    # Lazy pricing (user-requested, see ARCHITECTURE.md "Documented default
+    # decisions"): unlike PreconDeck's live-computed coverage, a PopularDeck
+    # row only ever caches search-result *metadata* - getting its actual
+    # card list means a real fetch to Moxfield/Archidekt, so pricing is an
+    # explicit, on-demand action (POST /api/discover/decks/{id}/price), not
+    # computed on every read. All four columns stay null until that's been
+    # triggered at least once, and go null again after any resync (the same
+    # delete-then-reinsert this table already gets - a fresh row has nothing
+    # to reuse a prior price for, and re-pricing is one click away).
+    coverage_percent: Mapped[float | None] = mapped_column()
+    # Sum of resolved prices only - see unpriced_missing_count below for why
+    # this can be a partial total rather than "no fake success" silently
+    # reporting a complete-looking number for an incomplete one.
+    missing_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 2))
+    missing_cost_currency: Mapped[str | None] = mapped_column(String(3))
+    # How many of the missing entries had no resolvable price at all
+    # (unlike app.metrics.dashboard_service.compute_list_missing_cost, which
+    # omits a list entirely rather than show a partial total, a single
+    # deck's price is worth showing even when incomplete - the UI surfaces
+    # this count alongside it instead of a misleadingly "whole" number).
+    unpriced_missing_count: Mapped[int | None] = mapped_column(Integer)
+    priced_at: Mapped[datetime | None] = mapped_column()
 
 
 class DeckDiscoverySyncState(Base):

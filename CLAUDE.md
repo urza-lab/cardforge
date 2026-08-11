@@ -364,6 +364,69 @@ consistent with the earlier smaller-sample estimate) have a real bracket
 set, and `?bracket=3` correctly returns only those. 319 backend tests
 pass; `ruff`, `mypy`, and the frontend `lint`/`build` are all clean.
 
+**"Best Coverage" (MTGJSON precon decks), the third of a four-part
+follow-up request, plus two things answered directly.** The user asked
+(1) to commit/push the CubeCobra+bracket-filter batch above (done, commit
+`c82547b`), (2) for lazy pricing (deferred - not built yet, see below),
+(3) to research and, if viable, build a "best coverage" feature ranking
+real decks/cubes by how much of each is already owned, and (4) why
+Archidekt's "likes" column always shows 0. (4) was a quick live check, not
+a bug: Archidekt's real deck-search API response has no likes/points/
+favorites field at all (full key list confirmed) - `like_count=0` is a
+deliberate honest choice, not fabrication. For (3), research found
+MTGJSON's bulk deck endpoints (`DeckList.json` + per-deck fetch) expose
+190 real official Commander precons with each card's exact
+`scryfallOracleId` already resolved - the only real source found where a
+deck's *complete* card list is available without a per-deck fetch to a
+rate-limit-sensitive site, making live coverage computation (no cached,
+staleness-prone percentage) actually cheap. Presented to the user before
+building; the user pushed back that 190 was sparse and asked about bigger
+unofficial Moxfield/Archidekt dumps - researched live (Kaggle/HuggingFace:
+none found; mtgdecks.net: real Cloudflare JS challenge on deck pages,
+ruled out per this project's access-control rule; cedh-decklist-
+database.com: a small niche site, not pursued) and reported back that no
+bigger legitimate source exists before proceeding with MTGJSON as planned.
+**Complete and verified end-to-end**: a real sync landed all 190 real
+Commander precons in ~2 minutes with 0 fetch errors; a real coverage-
+ranked query against the user's actual 2,653-card collection returned
+plausible numbers (13-33% for the top 10, none fully buildable, as
+expected for decks with no overlap-by-design with an existing collection);
+a real one-click import of the top-ranked deck ("Urza's Iron Alliance",
+100 real cards) landed 95/95 CSV rows with 0 errors through the existing
+upload pipeline (unlike Moxfield/Archidekt/CubeCobra, which use the
+URL-import pipeline instead - MTGJSON has no per-deck URL to fetch from).
+334 backend tests pass; `ruff`, `mypy`, and the frontend `lint`/`build`
+are all clean.
+
+**Lazy pricing, item (2) of the same four-part request, closing it out.**
+`POST /api/discover/decks/{id}/price` prices exactly one cached
+`PopularDeck` on an explicit "Price this deck" click - not the whole
+~18,000-deck cache eagerly, for the same real reason budget filtering on
+Discover Decks was scoped out earlier: a `PopularDeck` row only ever holds
+search-result metadata, so getting an actual card list to price means a
+real per-deck fetch to Moxfield/Archidekt, and doing that automatically
+for every cached deck would be a real rate-limit risk (gotcha #23 already
+burned this project once). Reuses the exact same `fetch_and_parse` call
+the URL-import pipeline makes, runs it through the existing comparison
+engine and Phase 6 pricing service, and caches
+`coverage_percent`/`missing_cost`/`unpriced_missing_count`/`priced_at`
+directly on the row so a repeat view is free - cleared again by the
+table's own periodic resync (accepted on purpose: a convenience value,
+one click to recompute, not data worth engineering a snapshot/restore
+around the way gotcha #19's price observations were). Unlike the
+Prometheus-exporter cost rollup (which omits a list entirely if any
+missing card lacks a price), a partial total is still shown here with
+`unpriced_missing_count` alongside it - a human just clicked the button
+and is looking at the result, so a partial real number beats no number.
+**Complete and verified end-to-end**: a real price request against
+"Winota: Snowball Stax" (Moxfield, 552,130 real views) returned real
+coverage (5.73%) and a real total ($4,227.26 USD, 0 unpriced) computed
+from the user's actual collection and real MTGJSON/Scryfall price data;
+a repeat `GET /api/discover/decks` showed the identical cached values with
+no re-fetch; the cached price survived a full `docker compose up -d
+--build` cycle. 343 backend tests pass; `ruff`, `mypy`, and the frontend
+`lint`/`build` are all clean.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key

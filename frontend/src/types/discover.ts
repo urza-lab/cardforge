@@ -20,4 +20,9 @@ export interface PopularDeck {
   color_identity: string[] | null;
   bracket: number | null;
   synced_at: string;
+  coverage_percent: number | null;
+  missing_cost: string | null;
+  missing_cost_currency: string | null;
+  unpriced_missing_count: number | null;
+  priced_at: string | null;
 }

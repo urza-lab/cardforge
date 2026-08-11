@@ -4,8 +4,9 @@ CardForge's source-adapter system is designed so every external source is
 optional and swappable, and manual import always works as a fallback.
 **Status: interface defined in Phase 1; Scryfall (Phase 3); Moxfield and
 Archidekt (Phase 5); MTGJSON (Phase 6) are all done, plus post-Phase-7
-additions: Moxfield/Archidekt deck discovery, EDHREC synthesized decks, and
-CubeCobra cube discovery. No direct Cardmarket API adapter — see below (now
+additions: Moxfield/Archidekt deck discovery, EDHREC synthesized decks,
+CubeCobra cube discovery, and MTGJSON precon decks ("Best Coverage"). No
+direct Cardmarket API adapter — see below (now
 backed by real research, not just an assumption: Cardmarket's own API is
 currently closed to new applications entirely, confirmed live against its
 official help page, regardless of the technical friction already noted).**
@@ -196,6 +197,58 @@ scryfall_resolution`, fixed with a functional index - a 450-card cube
 spanning far more distinct real sets than a typical deck was the first
 import in this project's history to actually hit that hard).
 
+**MTGJSON precon decks / "Best Coverage" (post-Phase-7, done,
+user-requested):** `app/source_adapters/mtgjson_precons.py` — a
+materially different kind of "discover a deck" source from every one
+above: instead of ranking by popularity, its whole point is that MTGJSON's
+bulk deck endpoints hand over each deck's *complete, exact* real card
+list, so buildability coverage against the user's own collection can be
+computed live rather than needing an import or per-deck external fetch
+first (see ARCHITECTURE.md "Documented default decisions" for why that's
+structurally impossible for Moxfield/Archidekt/CubeCobra's cached rows).
+Two real MTGJSON endpoints, both live-verified:
+
+- `GET /api/v5/DeckList.json` — a real manifest of every deck MTGJSON has
+  data for (3,004 total, live-checked), filtered to `type == "Commander
+  Deck"` (190 real official Commander precons).
+- `GET /api/v5/decks/{fileName}.json` — one real deck's full content.
+  Each card object carries `identifiers.scryfallOracleId` *and*
+  `identifiers.scryfallId` directly, so cards resolve to an exact
+  oracle_id with zero name/set-code matching ambiguity — better
+  resolution quality than any other deck-discovery source here, all of
+  which rely on some form of name or set+number matching instead.
+
+`PreconDeck` (`app/models/mtgjson_precons.py`) caches each deck's card
+list as JSONB (`{"name", "oracle_id", "quantity"}` per card) plus a
+ready-to-import CSV (`deck_text`, built with Python's `csv` module for
+safe quoting). The read endpoint (`GET /api/precons/decks`) doesn't just
+return cached rows — `app.services.precon_service.
+list_precon_decks_with_coverage` runs every cached deck's card list
+through the pure `app.comparison.engine.compare()` against the caller's
+collection *on every request* (cheap: no per-deck DB round-trip, unlike
+every other source's read side) and returns decks ranked highest-coverage-
+first. Import reuses the *upload* CSV pipeline (`source_type="csv"`),
+like EDHREC's `deck_text` — not the URL-import pipeline CubeCobra/
+Moxfield/Archidekt use — since MTGJSON isn't a deck-hosting site with a
+per-deck URL to fetch-and-parse from at import time.
+
+Scope was pushed back on before building: 190 decks was flagged by the
+user as sparse, prompting a live check for bigger unofficial Moxfield/
+Archidekt scrape dumps (Kaggle/HuggingFace: none found; mtgdecks.net:
+real Cloudflare JS challenge on individual deck pages, ruled out per this
+project's own access-control rule; cedh-decklist-database.com: a small
+niche site, not pursued further) — see ARCHITECTURE.md "Documented
+default decisions" for the full writeup. 190 real, exactly-resolved decks
+was confirmed the best legitimately available option.
+
+A real sync (2026-08-11) landed all 190 real Commander precons in ~2
+minutes with zero fetch errors; the real coverage-ranked list against the
+user's actual 2,653-card collection returned plausible numbers (13-33% for
+the top 10, none fully buildable — no precon is expected to already match
+an existing collection); a real one-click import of the top-ranked deck
+("Urza's Iron Alliance", 100 real cards / 95 distinct CSV lines) landed
+95/95 rows with 0 errors through the existing CSV upload pipeline.
+
 **MTGJSON (Phase 6, done):** implemented as `app/source_adapters/mtgjson.py`
 — a real price-data sync (`AllIdentifiers.json.xz` + `AllPricesToday.json`,
 see PRICING.md for the full join logic), its own `PriceSyncState`
@@ -262,6 +315,7 @@ class SourceAdapter(Protocol):
 | Moxfield + Archidekt deck discovery | api | post-7, done | Popular Commander decks only, two sources merged — see above |
 | EDHREC synthesized decks | scrape (`__NEXT_DATA__`) | post-7, done | Computed "average deck" per top-100 commander, not a real decklist — see above |
 | CubeCobra cube discovery + URL import | scrape (real routes found from source) | post-7, done | Popular cubes by real like count, plus a full URL-import adapter — see above |
+| MTGJSON precon decks ("Best Coverage") | api | post-7, done | 190 real Commander precons, ranked by live-computed buildability coverage — see above |
 | Cardmarket (direct API) | api | not planned | Applications are currently closed entirely (confirmed live) - MTGJSON already relays real Cardmarket EUR retail data meanwhile, see PRICING.md |
 | Generic configurable source | api/public_url | not planned | No concrete need yet — not scheduled |
 

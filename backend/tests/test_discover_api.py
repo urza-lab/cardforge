@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import pytest
 from app.core.database import get_sessionmaker
 from app.main import app
 from app.models.discover import PopularDeck
+from app.parsers.common import ParsedRow, ParseResult
+from app.services import pricing_service
+from app.source_adapters import moxfield
+from app.source_adapters.common import DeckFetchResult
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
@@ -91,3 +96,66 @@ def test_list_decks_bracket_filter():
 
     unfiltered = client.get("/api/discover/decks").json()
     assert len(unfiltered) == 3
+
+
+def test_price_deck_caches_result_and_returns_it(monkeypatch: pytest.MonkeyPatch):
+    _seed_deck(external_id="price-me", name="Price Me")
+    db = get_sessionmaker()()
+    try:
+        profile = pricing_service.get_or_create_default_price_profile(db)
+        profile_id = profile.id
+    finally:
+        db.close()
+
+    parse_result = ParseResult(
+        rows=[
+            ParsedRow(
+                row_number=1,
+                raw={"name": "Some Card"},
+                mapped={
+                    "name": "Some Card", "quantity": 1, "set_code": None, "collector_number": None,
+                    "language": None, "scryfall_id": None,
+                },
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        moxfield, "fetch_and_parse", lambda url, user_agent: DeckFetchResult(deck_name="Price Me", parse_result=parse_result)
+    )
+
+    decks = client.get("/api/discover/decks").json()
+    deck_id = next(d["id"] for d in decks if d["name"] == "Price Me")
+    assert decks[0]["priced_at"] is None
+
+    resp = client.post(f"/api/discover/decks/{deck_id}/price", json={"price_profile_id": profile_id})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["priced_at"] is not None
+    assert body["coverage_percent"] == 0.0
+    assert body["unpriced_missing_count"] == 1  # "Some Card" has no price observation seeded
+
+    refetched = client.get("/api/discover/decks").json()
+    assert refetched[0]["priced_at"] is not None  # cached, no re-fetch needed to see it
+
+
+def test_price_deck_404_for_unknown_deck():
+    db = get_sessionmaker()()
+    try:
+        profile_id = pricing_service.get_or_create_default_price_profile(db).id
+    finally:
+        db.close()
+
+    resp = client.post("/api/discover/decks/999999/price", json={"price_profile_id": profile_id})
+    assert resp.status_code == 404
+
+
+def test_price_deck_404_for_unknown_price_profile():
+    _seed_deck(external_id="no-profile", name="No Profile")
+    db = get_sessionmaker()()
+    try:
+        deck_id = db.query(PopularDeck).filter_by(external_id="no-profile").one().id
+    finally:
+        db.close()
+
+    resp = client.post(f"/api/discover/decks/{deck_id}/price", json={"price_profile_id": 999999})
+    assert resp.status_code == 404

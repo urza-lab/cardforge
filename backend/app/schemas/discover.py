@@ -1,8 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
+
+
+class PopularDeckPriceRequest(BaseModel):
+    price_profile_id: int
+    collection_id: int | None = None
 
 
 class DeckDiscoverySyncStatusRead(BaseModel):
@@ -29,3 +35,8 @@ class PopularDeckRead(BaseModel):
     color_identity: list[str] | None
     bracket: int | None
     synced_at: datetime
+    coverage_percent: float | None
+    missing_cost: Decimal | None
+    missing_cost_currency: str | None
+    unpriced_missing_count: int | None
+    priced_at: datetime | None

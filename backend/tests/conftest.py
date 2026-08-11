@@ -61,6 +61,7 @@ def _clean_db():
         db.execute(text("DELETE FROM popular_decks"))
         db.execute(text("DELETE FROM edhrec_synthesized_decks"))
         db.execute(text("DELETE FROM popular_cubes"))
+        db.execute(text("DELETE FROM precon_decks"))
         # price_observations isn't listed separately - it cascades away with
         # scryfall_cards below regardless of provider (manual/mtgjson rows
         # included), same as collection/list items' resolved_scryfall_card_id.
@@ -87,6 +88,12 @@ def _clean_db():
             text(
                 "UPDATE cube_discovery_sync_state SET status = 'NOT_STARTED', started_at = NULL, "
                 "finished_at = NULL, cube_count = 0, error_message = NULL WHERE id = 1"
+            )
+        )
+        db.execute(
+            text(
+                "UPDATE precon_sync_state SET status = 'NOT_STARTED', started_at = NULL, "
+                "finished_at = NULL, deck_count = 0, error_message = NULL WHERE id = 1"
             )
         )
         db.execute(

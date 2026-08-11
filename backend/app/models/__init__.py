@@ -24,6 +24,7 @@ from app.models.lists import (
     ListItemSection,
     ListType,
 )
+from app.models.mtgjson_precons import PRECON_SYNC_STATE_ID, PreconDeck, PreconSyncState, PreconSyncStatus
 from app.models.pricing import (
     DEFAULT_PRICE_PROFILE_NAME,
     DEFAULT_PROVIDER_PRIORITY,
@@ -46,6 +47,7 @@ __all__ = [
     "DEFAULT_USER_ID",
     "DISCOVERY_SYNC_STATE_ID",
     "EDHREC_SYNC_STATE_ID",
+    "PRECON_SYNC_STATE_ID",
     "SYNC_STATE_ID",
     "CardList",
     "CardListItem",
@@ -71,6 +73,9 @@ __all__ = [
     "ListType",
     "PopularCube",
     "PopularDeck",
+    "PreconDeck",
+    "PreconSyncState",
+    "PreconSyncStatus",
     "PriceObservation",
     "PriceProfile",
     "PriceProvider",

@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import delete, func, insert, select
 from sqlalchemy.orm import Session
 
+from app.comparison import ComparisonSettings, RequiredCard, compare
 from app.core.config import Settings, get_settings
 from app.core.queue import get_queue
 from app.models.discover import (
@@ -20,6 +22,8 @@ from app.models.discover import (
     DeckDiscoverySyncStatus,
     PopularDeck,
 )
+from app.services import pricing_service, scryfall_resolution
+from app.services.comparison_service import _owned_cards
 from app.source_adapters import archidekt, moxfield
 from app.source_adapters.common import PopularDeckEntry
 
@@ -31,8 +35,19 @@ _SOURCES: list[tuple[str, Callable[[str], list[PopularDeckEntry]]]] = [
     ("archidekt", archidekt.fetch_popular_decks),
 ]
 
+# Same two sources, keyed for price_popular_deck's real per-deck fetch
+# (fetch_and_parse) - the URL-import pipeline's own adapters
+# (app.services.list_import_service.URL_ADAPTERS), reused rather than
+# duplicated since a PopularDeck.source_url is exactly the same kind of URL
+# an import would fetch.
+_URL_ADAPTER_BY_SOURCE = {"moxfield": moxfield, "archidekt": archidekt}
+
 
 class SyncAlreadyInProgressError(Exception):
+    pass
+
+
+class DeckNotFoundError(Exception):
     pass
 
 
@@ -180,3 +195,68 @@ def list_popular_decks(
         decks = [d for d in decks if set(d.color_identity or []) <= allowed]
 
     return decks
+
+
+def price_popular_deck(
+    db: Session, deck_id: int, *, collection_id: int, price_profile_id: int, user_agent: str
+) -> PopularDeck:
+    """Lazy pricing (user-requested): a `PopularDeck` row only ever caches
+    search-result metadata (see app/models/discover.py), never a full card
+    list - unlike app.services.precon_service, whose MTGJSON source already
+    hands over every deck's complete list at sync time, computing a real
+    price here means a real per-deck fetch to the original source, the same
+    one `create_preview_from_url` makes at import time. Deliberately not run
+    for every cached deck on every sync (that's ~1,000+ external requests to
+    sites this project doesn't control - a real rate-limit risk, see
+    ARCHITECTURE.md) - only for the one deck a caller actually asks to
+    price, with the result cached on the row so a repeat view is free.
+    """
+    deck = db.get(PopularDeck, deck_id)
+    if deck is None:
+        raise DeckNotFoundError(deck_id)
+
+    profile = pricing_service.get_price_profile(db, price_profile_id)
+    if profile is None:
+        raise pricing_service.PriceProfileNotFoundError(price_profile_id)
+
+    adapter = _URL_ADAPTER_BY_SOURCE.get(deck.source)
+    if adapter is None:
+        raise ValueError(f"no URL adapter for discovery source '{deck.source}'")
+    fetch_result = adapter.fetch_and_parse(deck.source_url, user_agent)
+
+    required: list[RequiredCard] = []
+    for row in fetch_result.parse_result.rows:
+        if row.mapped is None:
+            continue
+        oracle_id, scryfall_card_id = scryfall_resolution.resolve_card(
+            db,
+            name=row.mapped["name"],
+            set_code=row.mapped["set_code"],
+            collector_number=row.mapped["collector_number"],
+            language=row.mapped["language"],
+            scryfall_id=row.mapped["scryfall_id"],
+        )
+        required.append(
+            RequiredCard(
+                name=row.mapped["name"],
+                quantity=row.mapped["quantity"],
+                oracle_id=oracle_id,
+                scryfall_card_id=scryfall_card_id,
+            )
+        )
+
+    owned = _owned_cards(db, collection_id)
+    result = compare(owned, required, ComparisonSettings(mode="oracle"))
+
+    priced = pricing_service.price_missing_cards(db, result.missing, profile, result.mode)
+    priced_amounts = [p.unit_price * p.missing_quantity for p in priced if p.unit_price is not None]
+    unpriced_count = sum(1 for p in priced if p.unit_price is None)
+
+    deck.coverage_percent = result.coverage_percent
+    deck.missing_cost = sum(priced_amounts, Decimal("0"))
+    deck.missing_cost_currency = profile.currency
+    deck.unpriced_missing_count = unpriced_count
+    deck.priced_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(deck)
+    return deck

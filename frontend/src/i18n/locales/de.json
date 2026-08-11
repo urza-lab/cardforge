@@ -8,6 +8,7 @@
     "listsImport": "Listen importieren",
     "discover": "Decks entdecken",
     "edhrec": "EDHREC Commander",
+    "precons": "Beste Abdeckung",
     "discoverCubes": "Cubes entdecken",
     "comparisons": "Vergleiche",
     "sources": "Quellen",
@@ -226,14 +227,19 @@
     "bracketAll": "Alle Brackets",
     "bracketHint": "Nur Archidekt-Decks, die ein Bracket gesetzt haben, haben eines — bei den meisten Decks fehlt es (~15% der Archidekt-Decks, bei Moxfield gar keine).",
     "empty": "Noch keine populären Decks zwischengespeichert — klicke oben auf \"Jetzt synchronisieren\".",
-    "columns": { "source": "Quelle", "author": "Autor", "colors": "Farben", "bracket": "Bracket", "views": "Views", "likes": "Likes" },
+    "columns": { "source": "Quelle", "author": "Autor", "colors": "Farben", "bracket": "Bracket", "views": "Views", "likes": "Likes", "price": "Abdeckung / Kosten" },
     "import": "Importieren",
     "importFailed": "Import fehlgeschlagen",
     "viewList": "Liste ansehen",
     "selectAll": "Alle auswählen",
     "bulkImport_one": "{{count}} ausgewählte importieren",
     "bulkImport_other": "{{count}} ausgewählte importieren",
-    "bulkImporting": "Importiere {{done}} / {{total}}…"
+    "bulkImporting": "Importiere {{done}} / {{total}}…",
+    "priceDeck": "Dieses Deck bepreisen",
+    "unpricedShort_one": "{{count}} ohne Preis",
+    "unpricedShort_other": "{{count}} ohne Preis",
+    "unpricedHint_one": "{{count}} fehlende Karte hat keine Preisdaten und ist in dieser Summe nicht enthalten.",
+    "unpricedHint_other": "{{count}} fehlende Karten haben keine Preisdaten und sind in dieser Summe nicht enthalten."
   },
   "edhrecPage": {
     "intro": "Für jeden der 100 populärsten Commander laut EDHREC's eigener Rangliste wird aus dessen realer durchschnittlicher Deck-Zusammensetzung und den meistgespielten Karten eine Decklist zusammengestellt — keine Liste, die eine einzelne Person tatsächlich gebaut hat.",
@@ -253,6 +259,28 @@
     "colorFilter": "Farbidentität",
     "empty": "Noch keine synthetisierten Decks zwischengespeichert — klicke oben auf \"Jetzt synchronisieren\".",
     "columns": { "commander": "Commander", "numDecks": "Echte Decks auf EDHREC", "cardCount": "Karten" }
+  },
+  "preconsPage": {
+    "intro": "Echte offizielle vorgefertigte Commander-Decks (aus MTGJSONs eigenen Massen-Deckdaten, exakte Kartenlisten) sortiert danach, wie viel davon du bereits besitzt — die tatsächliche Antwort auf \"welches Deck könnte ich mit den wenigsten Käufen sofort bauen\", bei jedem Öffnen dieser Seite frisch gegen deine Sammlung berechnet.",
+    "status": {
+      "NOT_STARTED": "Noch nicht synchronisiert",
+      "FETCHING": "Synchronisiert…",
+      "CURRENT": "Aktuell",
+      "FAILED": "Synchronisierung fehlgeschlagen"
+    },
+    "cachedDecks": "Zwischengespeicherte Decks",
+    "syncNow": "Jetzt synchronisieren",
+    "syncing": "Synchronisiert… (kann ein paar Minuten dauern — ~190 echte Deck-Abrufe)",
+    "empty": "Noch keine Precon-Decks zwischengespeichert — klicke oben auf \"Jetzt synchronisieren\".",
+    "missingCount_one": "{{count}} Karte fehlt",
+    "missingCount_other": "{{count}} Karten fehlen",
+    "columns": {
+      "name": "Deck",
+      "commanders": "Commander",
+      "releaseDate": "Erschienen",
+      "cardCount": "Karten",
+      "coverage": "Abdeckung"
+    }
   },
   "discoverCubesPage": {
     "intro": "Echte populäre Cubes aus CubeCobras eigenen öffentlichen Ranglisten (nach Likes) — durchsuchen und mit einem Klick importieren, statt selbst nach einer URL zu suchen. Lokal zwischengespeichert; \"Jetzt synchronisieren\" aktualisiert die Liste.",

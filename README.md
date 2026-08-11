@@ -35,6 +35,16 @@ pricing and refresh step is deterministic and reproducible.
 - A separate Discover Cubes tab browses real popular cubes from CubeCobra
   (ranked by real likes) the same way Discover Decks does for Moxfield/
   Archidekt — one-click (or bulk) import, no URL hunting required.
+- A "Best Coverage" tab ranks 190 real official Commander preconstructed
+  decks (from MTGJSON's own bulk deck data, exact card-for-card lists) by
+  how much of each you'd already own — computed fresh against your
+  collection every time you open it, not a cached percentage.
+- Discover Decks can price any single cached deck on demand ("Price this
+  deck") — a real fetch of that deck's actual card list, compared against
+  your collection and priced with your real market data, cached so a
+  repeat view is free. Not run automatically for every cached deck (that
+  would mean thousands of extra requests to sites this project doesn't
+  control).
 - Scryfall's card mirror and MTGJSON's price cache can sync themselves
   automatically on a schedule (`CARDFORGE_PERIODIC_SYNC_ENABLED`, default
   on, every 24h) instead of needing a manual "Sync now" click.

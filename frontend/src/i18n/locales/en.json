@@ -8,6 +8,7 @@
     "listsImport": "Import Lists",
     "discover": "Discover Decks",
     "edhrec": "EDHREC Commanders",
+    "precons": "Best Coverage",
     "discoverCubes": "Discover Cubes",
     "comparisons": "Comparisons",
     "sources": "Sources",
@@ -226,14 +227,19 @@
     "bracketAll": "Any bracket",
     "bracketHint": "Only Archidekt decks that set a bracket have one — most decks on either source don't (~15% of Archidekt decks, none on Moxfield).",
     "empty": "No popular decks cached yet — click \"Sync now\" above.",
-    "columns": { "source": "Source", "author": "Author", "colors": "Colors", "bracket": "Bracket", "views": "Views", "likes": "Likes" },
+    "columns": { "source": "Source", "author": "Author", "colors": "Colors", "bracket": "Bracket", "views": "Views", "likes": "Likes", "price": "Coverage / cost" },
     "import": "Import",
     "importFailed": "Import failed",
     "viewList": "View list",
     "selectAll": "Select all",
     "bulkImport_one": "Import {{count}} selected",
     "bulkImport_other": "Import {{count}} selected",
-    "bulkImporting": "Importing {{done}} / {{total}}…"
+    "bulkImporting": "Importing {{done}} / {{total}}…",
+    "priceDeck": "Price this deck",
+    "unpricedShort_one": "{{count}} unpriced",
+    "unpricedShort_other": "{{count}} unpriced",
+    "unpricedHint_one": "{{count}} missing card has no price data and isn't included in this total.",
+    "unpricedHint_other": "{{count}} missing cards have no price data and aren't included in this total."
   },
   "edhrecPage": {
     "intro": "For each of EDHREC's real top 100 Commander picks (by its own popularity ranking), a decklist is synthesized from that commander's real average deck composition and most-played cards — not a decklist any single person built.",
@@ -253,6 +259,28 @@
     "colorFilter": "Color identity",
     "empty": "No synthesized decks cached yet — click \"Sync now\" above.",
     "columns": { "commander": "Commander", "numDecks": "Real decks on EDHREC", "cardCount": "Cards" }
+  },
+  "preconsPage": {
+    "intro": "Real official Commander preconstructed decks (from MTGJSON's own bulk deck data, exact card-for-card lists) ranked by how much of each one you'd already own — the actual answer to \"which deck could I build right now with the fewest purchases\", computed fresh against your collection every time you open this page.",
+    "status": {
+      "NOT_STARTED": "Not synced yet",
+      "FETCHING": "Syncing…",
+      "CURRENT": "Up to date",
+      "FAILED": "Sync failed"
+    },
+    "cachedDecks": "Cached decks",
+    "syncNow": "Sync now",
+    "syncing": "Syncing… (can take a couple minutes — ~190 real deck fetches)",
+    "empty": "No precon decks cached yet — click \"Sync now\" above.",
+    "missingCount_one": "{{count}} card missing",
+    "missingCount_other": "{{count}} cards missing",
+    "columns": {
+      "name": "Deck",
+      "commanders": "Commander(s)",
+      "releaseDate": "Released",
+      "cardCount": "Cards",
+      "coverage": "Coverage"
+    }
   },
   "discoverCubesPage": {
     "intro": "Real popular cubes from CubeCobra's own public rankings (by likes) — browse, then import one with a click instead of hunting for a URL yourself. Cached locally; hit \"Sync now\" to refresh the list.",

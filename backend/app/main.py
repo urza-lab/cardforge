@@ -19,6 +19,7 @@ from app.api.list_imports import router as list_imports_router
 from app.api.lists import router as lists_router
 from app.api.metrics import router as metrics_router
 from app.api.mtgjson import router as mtgjson_router
+from app.api.mtgjson_precons import router as mtgjson_precons_router
 from app.api.prices import router as prices_router
 from app.api.scryfall import router as scryfall_router
 from app.api.settings import router as settings_router
@@ -80,6 +81,7 @@ app.include_router(metrics_router)
 app.include_router(discover_router)
 app.include_router(edhrec_router)
 app.include_router(cube_discover_router)
+app.include_router(mtgjson_precons_router)
 
 
 @app.get("/api")
