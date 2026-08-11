@@ -35,6 +35,7 @@ export default function Discover() {
   const [sort, setSort] = useState<"views" | "likes">("views");
   const [colorFilter, setColorFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState<"" | "moxfield" | "archidekt">("");
+  const [bracketFilter, setBracketFilter] = useState("");
 
   const [importState, setImportState] = useState<Record<number, ImportState>>({});
   const [importResult, setImportResult] = useState<Record<number, { listId: number } | { error: string }>>({});
@@ -53,10 +54,11 @@ export default function Discover() {
     const params = new URLSearchParams({ sort });
     if (colorFilter.trim()) params.set("color_identity", colorFilter.trim().toUpperCase());
     if (sourceFilter) params.set("source", sourceFilter);
+    if (bracketFilter) params.set("bracket", bracketFilter);
     apiGet<PopularDeck[]>(`/discover/decks?${params.toString()}`)
       .then(setDecks)
       .catch((err: unknown) => setDecksError(err instanceof ApiError ? err.message : String(err)));
-  }, [sort, colorFilter, sourceFilter]);
+  }, [sort, colorFilter, sourceFilter, bracketFilter]);
 
   useEffect(fetchStatus, [fetchStatus]);
   useEffect(fetchDecks, [fetchDecks]);
@@ -214,7 +216,19 @@ export default function Discover() {
               placeholder="e.g. WU"
             />
           </div>
+          <div>
+            <label htmlFor="disc-bracket">{t("discoverPage.bracketFilter")}</label>
+            <select id="disc-bracket" className="cf-select" value={bracketFilter} onChange={(e) => setBracketFilter(e.target.value)}>
+              <option value="">{t("discoverPage.bracketAll")}</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+            </select>
+          </div>
         </div>
+        {bracketFilter && <p style={{ fontSize: 12, color: "var(--cf-muted)" }}>{t("discoverPage.bracketHint")}</p>}
 
         {decksError && <div className="cf-alert cf-alert-error">{decksError}</div>}
         {!decks && !decksError && <p>{t("common.loading")}</p>}
@@ -250,6 +264,7 @@ export default function Discover() {
                     <th>{t("discoverPage.columns.source")}</th>
                     <th>{t("discoverPage.columns.author")}</th>
                     <th>{t("discoverPage.columns.colors")}</th>
+                    <th>{t("discoverPage.columns.bracket")}</th>
                     <th>{t("discoverPage.columns.views")}</th>
                     <th>{t("discoverPage.columns.likes")}</th>
                     <th></th>
@@ -277,6 +292,7 @@ export default function Discover() {
                         <td>{t(`discoverPage.source${deck.source === "archidekt" ? "Archidekt" : "Moxfield"}`)}</td>
                         <td>{deck.author ?? "—"}</td>
                         <td>{deck.color_identity && deck.color_identity.length > 0 ? deck.color_identity.join("") : "—"}</td>
+                        <td>{deck.bracket ?? "—"}</td>
                         <td>{deck.view_count.toLocaleString()}</td>
                         <td>{deck.like_count > 0 ? deck.like_count.toLocaleString() : "—"}</td>
                         <td>

@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     scryfall_user_agent: str = "CardForge/0.1 (+https://github.com/urza-lab/cardforge)"
     scryfall_bulk_auto_download: bool = True
 
+    # Periodic background sync (worker, see app.workers.run_worker) - keeps
+    # the Scryfall card mirror and MTGJSON price cache from going stale
+    # without needing a manual "Sync now" click. Off switch kept for the
+    # same "external services stay optional" reasoning as everything else
+    # that makes outbound network calls - default on since that's the
+    # actual behavior requested.
+    periodic_sync_enabled: bool = True
+    periodic_sync_interval_hours: int = 24
+
     # Default languages supported by the UI (ISO 639-1)
     default_locale: str = "en"
     supported_locales: str = "en,de"

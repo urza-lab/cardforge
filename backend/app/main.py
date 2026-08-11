@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.collections import router as collections_router
 from app.api.comparisons import router as comparisons_router
+from app.api.cube_discover import router as cube_discover_router
 from app.api.dashboard import router as dashboard_router
 from app.api.discover import router as discover_router
 from app.api.edhrec import router as edhrec_router
@@ -78,6 +79,7 @@ app.include_router(dashboard_router)
 app.include_router(metrics_router)
 app.include_router(discover_router)
 app.include_router(edhrec_router)
+app.include_router(cube_discover_router)
 
 
 @app.get("/api")

@@ -6,6 +6,7 @@ import CollectionImport from "./pages/CollectionImport";
 import Comparisons from "./pages/Comparisons";
 import Dashboard from "./pages/Dashboard";
 import Discover from "./pages/Discover";
+import DiscoverCubes from "./pages/DiscoverCubes";
 import EdhrecDecks from "./pages/EdhrecDecks";
 import ListDetail from "./pages/ListDetail";
 import Lists from "./pages/Lists";
@@ -22,6 +23,7 @@ const NAV_ITEMS: Array<{ to: string; key: string }> = [
   { to: "/lists", key: "nav.lists" },
   { to: "/lists/import", key: "nav.listsImport" },
   { to: "/discover", key: "nav.discover" },
+  { to: "/discover-cubes", key: "nav.discoverCubes" },
   { to: "/edhrec", key: "nav.edhrec" },
   { to: "/comparisons", key: "nav.comparisons" },
   { to: "/sources", key: "nav.sources" },
@@ -73,6 +75,7 @@ export default function App() {
           <Route path="/lists/import" element={<ListsImport />} />
           <Route path="/lists/:id" element={<ListDetail />} />
           <Route path="/discover" element={<Discover />} />
+          <Route path="/discover-cubes" element={<DiscoverCubes />} />
           <Route path="/edhrec" element={<EdhrecDecks />} />
           <Route path="/comparisons" element={<Comparisons />} />
           <Route path="/sources" element={<Sources />} />

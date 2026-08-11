@@ -46,6 +46,11 @@ class PopularDeck(Base):
     view_count: Mapped[int] = mapped_column(Integer, default=0)
     like_count: Mapped[int] = mapped_column(Integer, default=0)
     color_identity: Mapped[list[str] | None] = mapped_column(JSONB)
+    # WotC's official Commander Bracket (1-5) - only populated from Archidekt
+    # (its real API exposes `edhBracket`); Moxfield has no equivalent field,
+    # so every Moxfield row's bracket is always None. Even on Archidekt, most
+    # deck authors never set one - see app.source_adapters.common.PopularDeckEntry.
+    bracket: Mapped[int | None] = mapped_column(Integer)
     synced_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
 

@@ -34,7 +34,14 @@ API_BASE = "https://archidekt.com/api/decks"
 # (99 + commander). No login/API key needed for this public search.
 SEARCH_API = "https://archidekt.com/api/decks/v3/"
 POPULAR_DECKS_PAGE_SIZE = 60  # fixed by the API - not configurable, see above
-POPULAR_DECKS_PAGES = 5  # 5 x 60 = up to 300 decks
+# 200 x 60 = up to 12,000 decks - bumped after a user request for a much
+# bigger pool. No hard ceiling was found here (unlike Moxfield's real
+# 10,000-per-sort cap) - live research paged as deep as 10,000 (600,000
+# decks deep) and still got real, distinct decks back, but requests started
+# timing out around page 50,000, so this stays comfortably shallow of that
+# rather than chasing true exhaustiveness. Sync cost: 200 requests x 0.5s
+# pacing ~= 100s.
+POPULAR_DECKS_PAGES = 200
 COMMANDER_FORMAT_ID = 3
 # No 429 observed even firing 8 requests back-to-back during research, but a
 # small delay keeps this respectful of Archidekt's servers the same way the
@@ -186,6 +193,7 @@ def fetch_popular_decks(user_agent: str, *, fmt: int = COMMANDER_FORMAT_ID) -> l
                 # SEARCH_API note above) - 0 rather than a fabricated number.
                 like_count=0,
                 color_identity=color_identity,
+                bracket=entry.get("edhBracket"),
             )
 
     return list(by_id.values())

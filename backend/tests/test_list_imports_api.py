@@ -6,7 +6,7 @@ import httpx
 import pytest
 from app.main import app
 from app.security.ssrf_guard import SsrfBlockedError
-from app.source_adapters import moxfield
+from app.source_adapters import cubecobra, moxfield
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
@@ -297,6 +297,40 @@ def test_url_preview_exposes_deck_name(monkeypatch: pytest.MonkeyPatch):
         json={"list_id": list_id, "url": "https://moxfield.com/decks/abc123"},
     )
     assert preview.json()["deck_name"] == "URL Test Deck"
+
+
+def test_cubecobra_url_preview_confirm_sets_list_source(monkeypatch: pytest.MonkeyPatch):
+    sample_csv = (
+        "name,CMC,Type,Color,Set,Collector Number,Rarity,Color Category,status,Finish,board,maybeboard,"
+        "image URL,image Back URL,tags,Notes,MTGO ID,Custom,Voucher,Artist\r\n"
+        '"Sol Ring",1,"Artifact",,"c21","263",uncommon,null,"Not Owned","Non-foil","mainboard",false,,,'
+        '"","",12345,false,false,"Artist A"\r\n'
+    )
+
+    def _fake_get(url: str, **kwargs: object) -> httpx.Response:
+        return httpx.Response(200, content=sample_csv, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(cubecobra, "guarded_get", _fake_get)
+
+    list_id = _create_list("URL Cube")
+    preview = client.post(
+        "/api/list-imports/preview-url",
+        json={"list_id": list_id, "url": "https://cubecobra.com/cube/list/modovintage"},
+    )
+    assert preview.status_code == 201
+    body = preview.json()
+    assert body["source_type"] == "cubecobra"
+    assert body["valid_rows"] == 1
+
+    confirm = client.post(f"/api/list-imports/{body['id']}/confirm", json={"skip_bad_rows": False})
+    assert confirm.status_code == 200
+
+    card_list = client.get(f"/api/lists/{list_id}").json()
+    assert card_list["source_type"] == "cubecobra"
+    assert card_list["source_url"] == "https://cubecobra.com/cube/list/modovintage"
+
+    items = client.get(f"/api/lists/{list_id}/items").json()
+    assert items[0]["card_name"] == "Sol Ring"
 
 
 def test_file_preview_has_no_deck_name():

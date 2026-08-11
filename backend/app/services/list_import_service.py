@@ -31,10 +31,10 @@ from app.models.user import DEFAULT_USER_ID
 from app.parsers import LIST_PARSERS
 from app.parsers.common import ParseResult
 from app.services import scryfall_resolution
-from app.source_adapters import archidekt, moxfield
+from app.source_adapters import archidekt, cubecobra, moxfield
 
 # Keyed by CardList.source_type / ListImport.source_type.
-URL_ADAPTERS = {"moxfield": moxfield, "archidekt": archidekt}
+URL_ADAPTERS = {"moxfield": moxfield, "archidekt": archidekt, "cubecobra": cubecobra}
 
 
 class ListImportNotFoundError(Exception):
@@ -54,7 +54,7 @@ class ListImportHasErrorRowsError(Exception):
 
 
 class UnsupportedUrlError(ValueError):
-    """`url` doesn't match any known adapter (Moxfield/Archidekt)."""
+    """`url` doesn't match any known adapter (Moxfield/Archidekt/CubeCobra)."""
 
 
 def hash_file(content: bytes) -> str:
@@ -74,7 +74,7 @@ def detect_url_adapter(url: str) -> str:
     for name, adapter in URL_ADAPTERS.items():
         if adapter.validate_url(url):
             return name
-    raise UnsupportedUrlError(f"'{url}' is not a supported Moxfield or Archidekt deck URL")
+    raise UnsupportedUrlError(f"'{url}' is not a supported Moxfield, Archidekt, or CubeCobra URL")
 
 
 def find_prior_confirmed_import(db: Session, list_id: int, file_hash: str) -> ListImport | None:

@@ -272,6 +272,98 @@ the frontend uses; a real bulk refresh and real bulk delete were both run
 against real lists afterward. 301 backend tests pass; `ruff`, `mypy`, and
 the frontend `lint`/`build` are all clean.
 
+**A further seven-part user request, answered/built one at a time rather
+than assumed as a single batch.** (1) Automatic periodic background sync
+for Scryfall/MTGJSON, user-asked ("wäre sowas nicht sinnvoll") - built as a
+plain daemon thread (`app/workers/run_worker.py`
+`_periodic_data_sync_loop`), same shape as the existing staleness sweep,
+reusing each provider's own `trigger_sync` so a tick during an in-progress
+sync is rejected the same way a second manual click would be. Off switch
+kept (`CARDFORGE_PERIODIC_SYNC_ENABLED`, default on). Real bug found and
+fixed building this: two large syncs firing back-to-back (something manual
+clicking had never done) hit a real `psycopg.errors.
+DuplicatePreparedStatement` - fixed at the engine level (gotcha #28).
+(2) "Last updated" timestamp added to the Prices page (data already
+existed server-side, just wasn't rendered). (3) Manual sync button
+confirmed already present, no change needed. (4) Real research (not
+assumption) into direct Cardmarket API access for condition/language/
+seller filtering: Cardmarket's own help page states outright that new API
+applications aren't being accepted at all right now - stronger and more
+current than the original Phase 6 "real friction" reasoning, confirmed
+live rather than re-guessed. (5) Real research into bulk-downloading
+*all* Moxfield/Archidekt decks for a background "commander deck base":
+Moxfield hard-caps at 10,000 results per sort (confirmed live - page
+100/100 real, page 101 empty); Archidekt has no found ceiling (real,
+distinct decks still returned 600,000 decks deep) but starts timing out
+past ~50,000. Both pools were scaled up substantially anyway (Moxfield
+5→50 pages/sort, Archidekt 5→200 pages) since a bigger *browse* pool is
+straightforwardly valuable - but real "automatic coverage ranking across
+thousands of uncompared decks" would need fetching each deck's actual card
+list (not just search metadata), a materially bigger, rate-limit-risky
+feature not built here. (6) Bracket/budget filters on Discover Decks -
+real data check done (only ~15% of Archidekt decks have a bracket set at
+all), scope not yet decided with the user. (7) Real research into cube-
+list sources found CubeCobra has exactly what's needed - see the dedicated
+paragraph below, since it became its own real feature, not just a finding.
+262 → 301 → 318 backend tests across this whole batch; `ruff`/`mypy`/
+frontend `lint`+`build` clean throughout.
+
+**CubeCobra "Discover Cubes," the seventh item above, once research showed
+it was real and buildable.** CubeCobra is open source - its real routes
+were found by reading the actual server source (same technique that found
+Archidekt's real search API), then verified live: a real popularity-sorted
+(`likeCount`) cube search with DynamoDB cursor pagination, and a real per-
+cube CSV export needing zero new parsing code (fed through the *existing*
+deck/cube CSV parser via an explicit column mapping, plus one small
+adapter-local fix - injecting a synthetic Quantity=1 column, since cubes
+have no quantity concept and the shared parser hard-requires one). Kept as
+its own model/tab (`PopularCube`, `frontend/src/pages/DiscoverCubes.tsx`),
+same "materially different shape" reasoning as EDHREC, but *unlike* EDHREC
+it's a real fetchable URL so import reuses the URL-import pipeline like
+Moxfield/Archidekt. **Complete and verified end-to-end, including two more
+real bugs found live under real load, not hypothetical**: a real sync
+cached 1,419 real cubes (~75s); a real import of "The Pauper Cube" (2,270
+real likes, 450 real cards) landed 450/450 resolved with 0 errors - but
+getting there surfaced (a) a confusing multi-minute hang that turned out to
+be a coincidental periodic-sync lock wait, not a real bug (gotcha #29), and
+(b) a genuine full-table-scan in name-only card resolution that no import
+in this project's history had been big/varied enough to hit hard before
+(gotcha #30, fixed with a functional index, verified via `EXPLAIN ANALYZE`:
+~865ms sequential scan down to ~0.9ms). 318 backend tests pass; `ruff`,
+`mypy`, and the frontend `lint`/`build` are all clean.
+
+**Bracket filter on Discover Decks, decided after showing the user the real
+coverage number rather than assuming.** Live-checked before building: only
+~15% of real Archidekt decks have a bracket set at all, Moxfield has no
+such field. User chose to build it anyway - real WotC Commander Bracket
+data (1-5) Archidekt's search API already returns for free, a deck without
+one is simply excluded rather than shown with a fabricated value. Budget
+filtering (the other half of the same original ask) was scoped but not
+built: the user specifically asked whether it was a RAM/resource
+constraint, and it isn't - the real limit is that cached decks only ever
+hold search-result metadata, never a full card list, so pricing every
+cached deck would mean one additional per-deck fetch to Moxfield/Archidekt
+*each* (a real rate-limit risk on servers CardForge doesn't control), not
+a compute problem. A lazy-price-on-view approach was proposed instead,
+pending direction.
+
+Verifying this against real data (a real resync at the now much bigger
+pool sizes) hit a second real bug: the sync's `job_timeout` (900s) turned
+out not to be enough - the first real attempt at the enlarged pool sizes
+got killed by RQ's own `JobTimeoutException` with *nothing* committed,
+even though isolated per-request timing samples of both Moxfield and
+Archidekt during the same investigation showed nowhere near that slow.
+Root cause wasn't conclusively pinned down (a real sync immediately after
+doubling the timeout to 1800s completed in ~6.3 minutes, comfortably inside
+the *original* 900s window - the first attempt looks like a one-off
+slowdown, not a systematic issue) but the timeout was still doubled rather
+than left at a value already shown live to be insufficient once. That real
+resync landed 18,312 real decks (up from 993); the bracket filter was then
+confirmed live against that real data - 3,216 of 18,312 decks (~17.6%,
+consistent with the earlier smaller-sample estimate) have a real bracket
+set, and `?bracket=3` correctly returns only those. 319 backend tests
+pass; `ruff`, `mypy`, and the frontend `lint`/`build` are all clean.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key
@@ -582,6 +674,91 @@ variant of collection leverage (ARCHITECTURE.md).
     (or otherwise hot/frequent) code path — a helper's existing docstring
     saying "not batched, fine at this scale" is a warning label, not
     boilerplate; a new caller can invalidate the "this scale" part.
+28. **Two large batch-INSERT syncs (Scryfall then MTGJSON) run back-to-back
+    in the same worker process can hit `psycopg.errors.
+    DuplicatePreparedStatement: prepared statement "_pg3_0" already
+    exists`** (found live adding periodic background sync, post-Phase-7) —
+    a pooled SQLAlchemy connection reused within milliseconds of its
+    previous large `executemany` still had a server-side prepared statement
+    active, and psycopg3's next auto-generated statement name collided with
+    it. Every *manual*, spaced-out sync earlier in this project's life
+    never hit this — only two syncs firing back-to-back (as the new
+    periodic sync loop does) did, since real-world gaps between manual
+    triggers apparently gave the pool time to avoid the collision. Fixed by
+    disabling psycopg3's autoprepare entirely
+    (`connect_args={"prepare_threshold": None}` in
+    `app.core.database.get_engine`) — verified live both ways: reproduced
+    the exact failure once (trigger Scryfall, wait for CURRENT, immediately
+    trigger MTGJSON), confirmed the fix resolves it the same way, then
+    confirmed a real periodic-loop tick (both syncs enqueued within the
+    same tick) completes clean with the fix in place. Any future code that
+    fires multiple heavy batch-write jobs close together in the same
+    process should assume this class of bug is possible, not assume
+    connection pooling "just works" for that access pattern.
+29. **Restarting the `worker` container resets the periodic-sync thread's
+    startup delay, not just the staleness sweep's** (found live testing
+    CubeCobra import, post-Phase-7) — every `docker compose restart worker`
+    during active development (needed after any code change the worker
+    executes, see gotcha #18) re-arms `PERIODIC_SYNC_STARTUP_DELAY_SECONDS`
+    (60s) from scratch, so a real Scryfall+MTGJSON sync can kick off
+    mid-session with no warning, ~60s after any worker restart, regardless
+    of the real 24h interval setting. This isn't a bug to fix (the
+    behavior is correct - a fresh worker process legitimately doesn't know
+    how long it's been since the last real sync), but it did cause a real,
+    confusing multi-minute hang during this session: a large (450-card)
+    CubeCobra import's `confirm` got stuck behind Postgres locks held by a
+    coincidental Scryfall resync that fired ~60s after an unrelated worker
+    restart. Diagnosed via `pg_stat_activity`/`pg_blocking_pids` (`SELECT
+    a.pid, a.state, pg_blocking_pids(a.pid) FROM pg_stat_activity a WHERE
+    state != 'idle'`) - the import itself wasn't broken, it was just
+    waiting on a real, legitimate, but badly-timed sync. Expect this
+    combination (worker restart mid-dev-session -> real sync ~60s later)
+    and don't mistake the resulting lock wait for a new bug without
+    checking `pg_stat_activity` first.
+30. **`ScryfallCard.name.ilike(name)` with no wildcards forces a full
+    sequential scan of all ~530k rows on every unmatched name** (found live
+    during the same CubeCobra import hang above, via `EXPLAIN ANALYZE` -
+    confirmed ~865ms worst case per call) — a plain B-tree index on `name`
+    can't accelerate a case-insensitive comparison; Postgres needs a
+    functional index on `lower(name)` for that specifically. This had
+    always been a latent risk (`app.services.scryfall_resolution.
+    _match_oracle_id_by_name`, the fallback for any card whose set_code +
+    collector_number doesn't exactly match), but no prior real import in
+    this project's history had enough not-exact-set-match cards to make it
+    visible - a 450-card singleton cube spanning many more distinct real
+    sets than a typical ~100-card Commander deck was the first real case to
+    actually hit it hard. Fixed with a functional index
+    (`ix_scryfall_cards_name_lower` on `func.lower(name)`,
+    `app/models/scryfall.py`) plus changing the query to `func.lower(name)
+    == name.lower()` - verified live via `EXPLAIN ANALYZE`: ~865ms
+    sequential scan down to ~0.9ms index scan, same worst-case (no-match)
+    query. Note for future declarative-model functional indexes: `Index(...,
+    func.lower(col))` inside `__table_args__` needs `col` to already exist
+    as a class attribute, so `__table_args__` has to come *after* the
+    column definitions in the class body, not before (unlike a plain
+    string-column-name `Index(...)`, which resolves lazily and can go
+    either place).
+31. **A `job_timeout` sized off per-request pacing constants x page count
+    (`POPULAR_DECKS_PAGES_PER_SORT` etc.) was not actually enough once
+    those pool sizes were bumped a third time** (found live re-verifying
+    the bracket filter, post-Phase-7) — the discovery sync's `job_timeout`
+    stayed at 900s through two earlier pool-size increases without issue,
+    but the third bump (Moxfield 5→50 pages/sort, Archidekt 5→200 pages)
+    made a real sync attempt get killed by RQ's `JobTimeoutException` with
+    *nothing* committed (the delete-then-reinsert per source only commits
+    once that source's whole fetch completes), even though isolated
+    per-request timing samples of both APIs taken during the same
+    investigation showed nowhere near 900s of real work. Root cause wasn't
+    conclusively pinned down — a retry immediately after doubling the
+    timeout to 1800s completed in ~6.3 minutes, comfortably inside the
+    *original* 900s window, suggesting the first attempt hit a one-off
+    slowdown rather than a systematic problem — but the timeout was still
+    doubled rather than left at a value already shown live to be
+    insufficient once. Treat "this constant was fine at a smaller scale" as
+    something to re-verify live after any further scale-up, not something
+    that just linearly holds — a sync that used to comfortably fit its
+    timeout can stop fitting after a pool-size change even if the naive
+    per-request-time-times-request-count math still says it should.
 
 ## Principles to keep enforcing in later phases
 

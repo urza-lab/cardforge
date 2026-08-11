@@ -154,6 +154,11 @@ export default function Prices() {
                 <div className="cf-stat-label">{t("pricesPage.mtgjson.priceCount")}</div>
               </div>
             </div>
+            {mtgjson.finished_at && mtgjson.status !== "FETCHING" && (
+              <p style={{ color: "var(--cf-muted)" }}>
+                {t("pricesPage.mtgjson.lastUpdated")} {new Date(mtgjson.finished_at).toLocaleString()}
+              </p>
+            )}
             {mtgjson.status === "FAILED" && mtgjson.error_message && (
               <div className="cf-alert cf-alert-error">{mtgjson.error_message}</div>
             )}

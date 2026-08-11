@@ -8,6 +8,7 @@
     "listsImport": "Listen importieren",
     "discover": "Decks entdecken",
     "edhrec": "EDHREC Commander",
+    "discoverCubes": "Cubes entdecken",
     "comparisons": "Vergleiche",
     "sources": "Quellen",
     "prices": "Preise",
@@ -135,7 +136,7 @@
     "modeFile": "Datei / einfügen",
     "modeUrl": "Von einer URL",
     "urlLabel": "Deck-URL",
-    "urlHint": "Öffentliche Moxfield- oder Archidekt-Deck-URLs — kein Login nötig. Die Liste bleibt mit dieser URL verknüpft und kann später aktualisiert werden.",
+    "urlHint": "Öffentliche Moxfield-/Archidekt-Deck-URLs oder CubeCobra-Cube-URLs — kein Login nötig. Die Liste bleibt mit dieser URL verknüpft und kann später aktualisiert werden.",
     "multiUrl": "Mehrere Decks auf einmal importieren",
     "multiUrlLabel": "Deck-URLs (eine pro Zeile)",
     "multiUrlHint": "Jede URL wird eine eigene neue Liste, benannt nach dem echten Decknamen sobald abgerufen. Nur öffentliche Moxfield- oder Archidekt-URLs, wie oben.",
@@ -147,7 +148,8 @@
       "json": "JSON",
       "csv": "CSV",
       "moxfield": "Moxfield",
-      "archidekt": "Archidekt"
+      "archidekt": "Archidekt",
+      "cubecobra": "CubeCobra"
     },
     "placeholder": "4 Lightning Bolt\n1 Sol Ring (C21) 263\nCommander: Atraxa, Praetors' Voice",
     "viewList": "Liste ansehen",
@@ -220,8 +222,11 @@
     "sortViews": "Meiste Views",
     "sortLikes": "Meiste Likes",
     "colorFilter": "Farbidentität",
+    "bracketFilter": "Bracket",
+    "bracketAll": "Alle Brackets",
+    "bracketHint": "Nur Archidekt-Decks, die ein Bracket gesetzt haben, haben eines — bei den meisten Decks fehlt es (~15% der Archidekt-Decks, bei Moxfield gar keine).",
     "empty": "Noch keine populären Decks zwischengespeichert — klicke oben auf \"Jetzt synchronisieren\".",
-    "columns": { "source": "Quelle", "author": "Autor", "colors": "Farben", "views": "Views", "likes": "Likes" },
+    "columns": { "source": "Quelle", "author": "Autor", "colors": "Farben", "bracket": "Bracket", "views": "Views", "likes": "Likes" },
     "import": "Importieren",
     "importFailed": "Import fehlgeschlagen",
     "viewList": "Liste ansehen",
@@ -249,6 +254,22 @@
     "empty": "Noch keine synthetisierten Decks zwischengespeichert — klicke oben auf \"Jetzt synchronisieren\".",
     "columns": { "commander": "Commander", "numDecks": "Echte Decks auf EDHREC", "cardCount": "Karten" }
   },
+  "discoverCubesPage": {
+    "intro": "Echte populäre Cubes aus CubeCobras eigenen öffentlichen Ranglisten (nach Likes) — durchsuchen und mit einem Klick importieren, statt selbst nach einer URL zu suchen. Lokal zwischengespeichert; \"Jetzt synchronisieren\" aktualisiert die Liste.",
+    "status": {
+      "NOT_STARTED": "Noch nicht synchronisiert",
+      "FETCHING": "Synchronisiert…",
+      "CURRENT": "Aktuell",
+      "FAILED": "Synchronisierung fehlgeschlagen"
+    },
+    "cachedCubes": "Zwischengespeicherte Cubes",
+    "syncNow": "Jetzt synchronisieren",
+    "syncing": "Synchronisiert…",
+    "sortLikes": "Meiste Likes",
+    "sortCards": "Meiste Karten",
+    "empty": "Noch keine populären Cubes zwischengespeichert — klicke oben auf \"Jetzt synchronisieren\".",
+    "columns": { "owner": "Besitzer", "cards": "Karten" }
+  },
   "pricesPage": {
     "mtgjson": {
       "title": "MTGJSON-Preisdaten",
@@ -260,7 +281,8 @@
       },
       "priceCount": "Zwischengespeicherte Preise",
       "syncNow": "Jetzt synchronisieren",
-      "syncing": "Synchronisiert…"
+      "syncing": "Synchronisiert…",
+      "lastUpdated": "Zuletzt aktualisiert"
     },
     "providers": {
       "manual": "Manuell",

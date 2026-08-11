@@ -20,8 +20,10 @@ pricing and refresh step is deterministic and reproducible.
 - A native dashboard shows collection/deck stats at a glance, plus an
   optional real Grafana + Prometheus setup for deeper metrics history.
 - Browse real popular Commander decks (ranked by Moxfield's and Archidekt's
-  own view/like counts) and import one — or several at once — against your
-  collection with a click, instead of hunting down decklist URLs yourself.
+  own view/like counts, filterable by color identity and — where set — WotC's
+  official Commander Bracket) and import one — or several at once — against
+  your collection with a click, instead of hunting down decklist URLs
+  yourself.
 - A separate EDHREC tab synthesizes an "average deck" for each of EDHREC's
   own real top 100 Commander picks, built from that commander's real
   most-played cards and typical card-type counts — clearly labeled as
@@ -30,6 +32,12 @@ pricing and refresh step is deterministic and reproducible.
 - The optional Grafana stack can embed a "highest-coverage decks" panel
   directly on the Dashboard page (via Grafana's own Public Dashboard
   sharing, scoped to just that one panel) — see `ARCHITECTURE.md`.
+- A separate Discover Cubes tab browses real popular cubes from CubeCobra
+  (ranked by real likes) the same way Discover Decks does for Moxfield/
+  Archidekt — one-click (or bulk) import, no URL hunting required.
+- Scryfall's card mirror and MTGJSON's price cache can sync themselves
+  automatically on a schedule (`CARDFORGE_PERIODIC_SYNC_ENABLED`, default
+  on, every 24h) instead of needing a manual "Sync now" click.
 
 ## Why no AI
 

@@ -50,6 +50,7 @@ class ListImportSourceType(str, enum.Enum):
     csv = "csv"
     moxfield = "moxfield"
     archidekt = "archidekt"
+    cubecobra = "cubecobra"
 
 
 class ListImportStatus(str, enum.Enum):

@@ -8,6 +8,7 @@
     "listsImport": "Import Lists",
     "discover": "Discover Decks",
     "edhrec": "EDHREC Commanders",
+    "discoverCubes": "Discover Cubes",
     "comparisons": "Comparisons",
     "sources": "Sources",
     "prices": "Prices",
@@ -135,7 +136,7 @@
     "modeFile": "File / paste",
     "modeUrl": "From a URL",
     "urlLabel": "Deck URL",
-    "urlHint": "Public Moxfield or Archidekt deck URLs — no login required. The list stays linked to this URL and can be refreshed later.",
+    "urlHint": "Public Moxfield/Archidekt deck URLs or CubeCobra cube URLs — no login required. The list stays linked to this URL and can be refreshed later.",
     "multiUrl": "Import multiple decks at once",
     "multiUrlLabel": "Deck URLs (one per line)",
     "multiUrlHint": "Each URL becomes its own new list, named from the real deck name once fetched. Public Moxfield or Archidekt URLs only, same as above.",
@@ -147,7 +148,8 @@
       "json": "JSON",
       "csv": "CSV",
       "moxfield": "Moxfield",
-      "archidekt": "Archidekt"
+      "archidekt": "Archidekt",
+      "cubecobra": "CubeCobra"
     },
     "placeholder": "4 Lightning Bolt\n1 Sol Ring (C21) 263\nCommander: Atraxa, Praetors' Voice",
     "viewList": "View list",
@@ -220,8 +222,11 @@
     "sortViews": "Most viewed",
     "sortLikes": "Most liked",
     "colorFilter": "Color identity",
+    "bracketFilter": "Bracket",
+    "bracketAll": "Any bracket",
+    "bracketHint": "Only Archidekt decks that set a bracket have one — most decks on either source don't (~15% of Archidekt decks, none on Moxfield).",
     "empty": "No popular decks cached yet — click \"Sync now\" above.",
-    "columns": { "source": "Source", "author": "Author", "colors": "Colors", "views": "Views", "likes": "Likes" },
+    "columns": { "source": "Source", "author": "Author", "colors": "Colors", "bracket": "Bracket", "views": "Views", "likes": "Likes" },
     "import": "Import",
     "importFailed": "Import failed",
     "viewList": "View list",
@@ -249,6 +254,22 @@
     "empty": "No synthesized decks cached yet — click \"Sync now\" above.",
     "columns": { "commander": "Commander", "numDecks": "Real decks on EDHREC", "cardCount": "Cards" }
   },
+  "discoverCubesPage": {
+    "intro": "Real popular cubes from CubeCobra's own public rankings (by likes) — browse, then import one with a click instead of hunting for a URL yourself. Cached locally; hit \"Sync now\" to refresh the list.",
+    "status": {
+      "NOT_STARTED": "Not synced yet",
+      "FETCHING": "Syncing…",
+      "CURRENT": "Up to date",
+      "FAILED": "Sync failed"
+    },
+    "cachedCubes": "Cached cubes",
+    "syncNow": "Sync now",
+    "syncing": "Syncing…",
+    "sortLikes": "Most liked",
+    "sortCards": "Most cards",
+    "empty": "No popular cubes cached yet — click \"Sync now\" above.",
+    "columns": { "owner": "Owner", "cards": "Cards" }
+  },
   "pricesPage": {
     "mtgjson": {
       "title": "MTGJSON price data",
@@ -260,7 +281,8 @@
       },
       "priceCount": "Prices cached",
       "syncNow": "Sync now",
-      "syncing": "Syncing…"
+      "syncing": "Syncing…",
+      "lastUpdated": "Last updated"
     },
     "providers": {
       "manual": "Manual",

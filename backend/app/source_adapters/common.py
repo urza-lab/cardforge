@@ -27,3 +27,8 @@ class PopularDeckEntry:
     view_count: int
     like_count: int
     color_identity: list[str] | None
+    # WotC's official Commander Bracket (1-5), where the source exposes one -
+    # confirmed live only on Archidekt (`edhBracket`); Moxfield's search API
+    # has no equivalent field at all. None means "not set by the deck's own
+    # author," not "unknown" - most decks on either source don't have one.
+    bracket: int | None = None

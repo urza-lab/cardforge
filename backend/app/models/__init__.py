@@ -1,4 +1,10 @@
 from app.models.collection import Collection, CollectionItem
+from app.models.cubecobra import (
+    CUBE_DISCOVERY_SYNC_STATE_ID,
+    CubeDiscoverySyncState,
+    CubeDiscoverySyncStatus,
+    PopularCube,
+)
 from app.models.discover import (
     DISCOVERY_SYNC_STATE_ID,
     DeckDiscoverySyncState,
@@ -36,6 +42,7 @@ __all__ = [
     "DEFAULT_PREFERRED_CURRENCY",
     "DEFAULT_PRICE_PROFILE_NAME",
     "DEFAULT_PROVIDER_PRIORITY",
+    "CUBE_DISCOVERY_SYNC_STATE_ID",
     "DEFAULT_USER_ID",
     "DISCOVERY_SYNC_STATE_ID",
     "EDHREC_SYNC_STATE_ID",
@@ -44,6 +51,8 @@ __all__ = [
     "CardListItem",
     "Collection",
     "CollectionItem",
+    "CubeDiscoverySyncState",
+    "CubeDiscoverySyncStatus",
     "DeckDiscoverySyncState",
     "DeckDiscoverySyncStatus",
     "EdhrecSyncState",
@@ -60,6 +69,7 @@ __all__ = [
     "ListImportStatus",
     "ListItemSection",
     "ListType",
+    "PopularCube",
     "PopularDeck",
     "PriceObservation",
     "PriceProfile",

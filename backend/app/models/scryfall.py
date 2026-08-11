@@ -36,7 +36,6 @@ class ScryfallSyncStatus(str, enum.Enum):
 
 class ScryfallCard(Base):
     __tablename__ = "scryfall_cards"
-    __table_args__ = (Index("ix_scryfall_cards_set_collector", "set_code", "collector_number"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)  # Scryfall's printing id (UUID)
     oracle_id: Mapped[str] = mapped_column(String(36), index=True)
@@ -60,6 +59,15 @@ class ScryfallCard(Base):
     nonfoil: Mapped[bool] = mapped_column(Boolean, default=False)
     released_at: Mapped[str | None] = mapped_column(String(10))  # ISO date, kept as text - never computed on
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("ix_scryfall_cards_set_collector", "set_code", "collector_number"),
+        # Backs app.services.scryfall_resolution._match_oracle_id_by_name's
+        # case-insensitive exact-name lookup - see that function's own
+        # comment for why the plain `name` index above (`index=True`) can't
+        # accelerate a case-insensitive comparison on its own.
+        Index("ix_scryfall_cards_name_lower", func.lower(name)),
+    )
 
 
 class ScryfallSyncState(Base):

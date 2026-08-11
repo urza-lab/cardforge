@@ -641,6 +641,28 @@ be decided without blocking implementation. All are changeable later.
   already synthesized and stored as plain text at sync time — so import
   just sends that stored text through the exact same upload path a manually
   pasted text list already uses, with zero new backend import/parsing code.
+- **Periodic background sync for Scryfall/MTGJSON (user-requested,
+  "wäre sowas nicht sinnvoll") reuses the exact same staleness-sweep shape
+  as the list-refresh system** (`app/workers/run_worker.py`
+  `_periodic_data_sync_loop` - a plain daemon thread with a sleep loop, same
+  "no repeating-job support in rq==2.1.0" reasoning as the sweep it sits
+  next to) rather than each provider's own bespoke scheduling. It calls
+  each provider's existing `trigger_sync(db)` - the same function the
+  manual "Sync now" button calls - so a tick landing while a sync is
+  already `FETCHING` (started manually, by the other provider's tick, or a
+  slow previous run) is rejected the same way a second manual click would
+  be, not queued as a wasteful duplicate. Kept behind a real off switch
+  (`CARDFORGE_PERIODIC_SYNC_ENABLED`, default on) for the same "external
+  services stay optional" reasoning as everything else that makes outbound
+  network calls on its own. **Building this surfaced a real
+  `psycopg.errors.DuplicatePreparedStatement` bug** (see CLAUDE.md gotcha
+  #28) that no earlier manual, spaced-out sync in this project's whole
+  history had ever hit - only two syncs firing back-to-back did. Fixed at
+  the engine level (`app/core/database.py`,
+  `connect_args={"prepare_threshold": None}`), not by adding artificial
+  spacing between the two triggers, since the same class of bug could
+  recur from any future code path that fires multiple heavy batch-write
+  jobs close together.
 - **Bulk multi-URL deck import (Import Lists page, user-requested) reuses
   the same three-call pipeline per URL, sequentially - no new backend
   import path.** Each pasted URL gets its own auto-created `CardList`
@@ -665,6 +687,75 @@ be decided without blocking implementation. All are changeable later.
   is *exactly* {W, U} — matching how deckbuilding actually works ("what
   can I build in these colors") rather than a literal string-equality
   filter almost nothing would pass.
+- **The bracket filter was built despite real, checked-live sparse
+  coverage (~15% of Archidekt decks, 0% of Moxfield decks - confirmed live
+  before building), rather than skipped for "not enough data"** - the user
+  explicitly chose to build it anyway once shown the real number, on the
+  reasoning that a filter over incomplete-but-real data (decks without a
+  bracket simply don't match, never fabricated one) still has genuine value
+  for the ~15% it does cover, and costs nothing extra since Archidekt's
+  real search API already returns `edhBracket` in the same response
+  `fetch_popular_decks` already parses - see SOURCE_ADAPTERS.md.
+- **Budget filtering on Discover Decks was scoped-but-not-built after the
+  user asked specifically whether it was a RAM/resource constraint**: it
+  isn't - a batched price lookup (the same pattern gotcha #27's fix
+  established) would make the actual price *computation* cheap. The real
+  constraint is external and structural: cached `PopularDeck` rows only
+  ever hold search-result *metadata* (name/views/likes), never a deck's
+  actual card list - getting that requires the same per-deck fetch used at
+  import time, and there is no bulk "many decks' contents at once" endpoint
+  on either Moxfield or Archidekt, only bulk *search*. Bulk-pricing all
+  ~1,000 cached decks would mean ~1,000 additional individual HTTP requests
+  to those sites' per-deck endpoints on top of what discovery sync already
+  does - a real rate-limit/goodwill risk (Moxfield has already 429'd this
+  project once at far lower volume), not a compute-resource one. Proposed
+  instead, pending the user's direction: price a deck lazily the first time
+  it's actually viewed/considered, caching the result, so budget-sortable
+  coverage builds up organically without an eager bulk sweep.
+- **Periodic background sync (user-requested) reuses each provider's own
+  `trigger_sync(db)` instead of enqueueing the sync job directly** (see
+  ARCHITECTURE.md's own entry above for the shape) - guarantees a tick that
+  lands mid-sync is rejected the same way a second manual "Sync now" click
+  would be, not queued as a duplicate. Real, unplanned discovery from
+  building this: two large batch-write syncs firing back-to-back (which
+  manual, human-paced clicking had never done before) surfaced a real
+  `psycopg.errors.DuplicatePreparedStatement` bug - see CLAUDE.md gotcha
+  #28 for the fix (disabling psycopg3 autoprepare at the engine level).
+- **CubeCobra fills the cube-support gap this doc's "Documented default
+  decisions" and SOURCE_ADAPTERS.md both used to describe as "not planned"**
+  - the earlier conclusion (no public Moxfield cube-search API, a CubeCobra
+  adapter would be "new, unverified work") wasn't wrong about Moxfield, but
+  never actually verified CubeCobra itself; real research this time (reading
+  CubeCobra's own open-source server code, the same technique that found
+  Archidekt's real search API) found it has exactly what's needed: a real
+  popularity-sorted search endpoint and a real per-cube CSV export. Kept as
+  its own model/tab rather than merged into `PopularDeck`/Discover Decks,
+  same "materially different shape" reasoning as EDHREC (a cube isn't a
+  deck - card_count/tags instead of format/color-identity, and CubeCobra's
+  only real popularity signal is likes, no separate view count) - but
+  *unlike* EDHREC, CubeCobra cubes are real decklists (er, cube lists) with
+  a real fetchable URL, so import reuses the URL-import pipeline (like
+  Moxfield/Archidekt) rather than the file-upload one.
+- **CubeCobra's CSV export needed one small adapter-local transform, not a
+  new parser**: its real export has no quantity column at all (every card
+  in a cube is implicitly one copy), but `app/parsers/list_csv.py` hard-
+  requires a detected quantity column for any CSV source. Rather than
+  changing that shared parser's behavior for every other CSV caller, the
+  adapter injects a synthetic `Quantity=1` column into the fetched CSV text
+  before handing it to the existing parser - the one CubeCobra-specific
+  accommodation lives entirely in `app/source_adapters/cubecobra.py`.
+- **A real 450-card CubeCobra cube import was the first import in this
+  project's history to seriously expose a latent full-table-scan in name-
+  only card resolution** (`app.services.scryfall_resolution.
+  _match_oracle_id_by_name`'s `ILIKE` on the ~530k-row `scryfall_cards`
+  table, confirmed via `EXPLAIN ANALYZE` at ~865ms worst case *per
+  unmatched card*) - a singleton cube spanning far more distinct real sets
+  than a typical ~100-card Commander deck sends far more cards through that
+  fallback path. Fixed with a functional index on `lower(name)` - see
+  CLAUDE.md gotcha #30 for the live verification (865ms sequential scan
+  down to ~0.9ms index scan) and the declarative-model ordering gotcha it
+  ran into along the way (`__table_args__` referencing `func.lower(col)`
+  has to come after that column's own definition in the class body).
 
 ## Backend module boundaries
 

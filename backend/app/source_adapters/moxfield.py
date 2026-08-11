@@ -33,11 +33,13 @@ API_BASE = "https://api.moxfield.com/v2/decks/all"
 # see SOURCE_ADAPTERS.md "Documented default decisions").
 SEARCH_API = "https://api.moxfield.com/v2/decks/search"
 POPULAR_DECKS_PAGE_SIZE = 100
-# 5 pages x 2 sorts x 100/page = up to 1000 raw rows before dedup - bumped
-# from the original 2 (291 real decks cached) after a user request for a
-# bigger local pool to browse/analyze against. Still well within the
-# pacing budget below (10 requests x 1.5s ~= 15s for the whole sync).
-POPULAR_DECKS_PAGES_PER_SORT = 5
+# 50 pages x 100/page = 5,000 raw rows per sort - bumped again after a
+# second user request for a much bigger pool. Moxfield's search API hard-
+# caps at 10,000 results (100 pages) per sort regardless (confirmed live -
+# page 100/100 still real data, page 101 empty); 50 stays well short of
+# that ceiling while keeping sync time reasonable (100 requests total
+# across both sorts x 1.5s pacing ~= 150s).
+POPULAR_DECKS_PAGES_PER_SORT = 50
 POPULAR_DECKS_SORTS = ("views", "likes")
 # A real 429 was hit during development after firing off many unique-query
 # requests back-to-back with no pacing at all - a small delay between each

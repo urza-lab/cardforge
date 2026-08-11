@@ -79,3 +79,15 @@ def test_list_decks_source_filter():
 
     resp = client.get("/api/discover/decks?source=archidekt").json()
     assert [d["name"] for d in resp] == ["Ark Deck"]
+
+
+def test_list_decks_bracket_filter():
+    _seed_deck(external_id="no-bracket", name="No Bracket", bracket=None)
+    _seed_deck(external_id="bracket-3", name="Bracket 3", bracket=3)
+    _seed_deck(external_id="bracket-4", name="Bracket 4", bracket=4)
+
+    resp = client.get("/api/discover/decks?bracket=3").json()
+    assert [d["name"] for d in resp] == ["Bracket 3"]
+
+    unfiltered = client.get("/api/discover/decks").json()
+    assert len(unfiltered) == 3

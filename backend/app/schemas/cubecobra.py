@@ -5,27 +5,24 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
-class DeckDiscoverySyncStatusRead(BaseModel):
+class CubeDiscoverySyncStatusRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     status: str
     started_at: datetime | None
     finished_at: datetime | None
-    deck_count: int
+    cube_count: int
     error_message: str | None
 
 
-class PopularDeckRead(BaseModel):
+class PopularCubeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    source: str
     name: str
-    author: str | None
+    owner_username: str | None
     source_url: str
-    format: str
-    view_count: int
+    card_count: int
     like_count: int
-    color_identity: list[str] | None
-    bracket: int | None
+    tags: list[str] | None
     synced_at: datetime

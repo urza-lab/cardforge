@@ -3,8 +3,12 @@
 CardForge's source-adapter system is designed so every external source is
 optional and swappable, and manual import always works as a fallback.
 **Status: interface defined in Phase 1; Scryfall (Phase 3); Moxfield and
-Archidekt (Phase 5); MTGJSON (Phase 6) are all done. No direct Cardmarket
-API adapter — see below.**
+Archidekt (Phase 5); MTGJSON (Phase 6) are all done, plus post-Phase-7
+additions: Moxfield/Archidekt deck discovery, EDHREC synthesized decks, and
+CubeCobra cube discovery. No direct Cardmarket API adapter — see below (now
+backed by real research, not just an assumption: Cardmarket's own API is
+currently closed to new applications entirely, confirmed live against its
+official help page, regardless of the technical friction already noted).**
 
 **Scryfall (Phase 3, done):** implemented as `app/source_adapters/scryfall.py`
 — bulk-data download/parse/mirror into `scryfall_cards`, triggered
@@ -42,8 +46,12 @@ than one:
 
 - **Moxfield**: `app/source_adapters/moxfield.py`'s `fetch_popular_decks`
   queries the public `/v2/decks/search` endpoint (`sortType=views` and
-  `sortType=likes`, `fmt=commander`, `POPULAR_DECKS_PAGES_PER_SORT = 5`
-  pages of 100/page per sort), merging/deduping both sorts by `publicId`.
+  `sortType=likes`, `fmt=commander`, `POPULAR_DECKS_PAGES_PER_SORT = 50`
+  pages of 100/page per sort - bumped from an original 5, then 5, then 50
+  across three separate user requests for a bigger pool), merging/deduping
+  both sorts by `publicId`. Moxfield's search API hard-caps at 10,000
+  results (100 pages) per sort regardless (confirmed live - page 100/100
+  still real, page 101 empty), so 50 stays comfortably short of that.
 - **Archidekt**: an initial check during the original discovery work
   concluded Archidekt's search needed authentication - that was wrong, just
   an incomplete check (the real search API lives at a different, undocumented
@@ -56,10 +64,21 @@ than one:
   than an honored sort, so Archidekt decks are only ever ranked by views
   (`like_count` is always 0 for this source, not fabricated). The API
   ignores `pageSize`/`size`/`limit` entirely and always returns a fixed 60
-  results/page (confirmed live, undocumented) - `POPULAR_DECKS_PAGES = 5`
-  (~300 decks). No `colorIdentity` field exists; `colors` (a per-WUBRG
-  percentage-of-cards breakdown) is used as an approximation instead - keys
-  with a nonzero value become the deck's `color_identity` for filtering.
+  results/page (confirmed live, undocumented) - `POPULAR_DECKS_PAGES = 200`
+  (~12,000 decks, bumped from an original 5 for the same reason as
+  Moxfield's bump above). No hard ceiling was found for Archidekt (live
+  research paged 10,000 deep - 600,000 decks - and still got real, distinct
+  results back), but requests start timing out past ~50,000, so 200 stays
+  comfortably shallow of that rather than chasing true exhaustiveness. No
+  `colorIdentity` field exists; `colors` (a per-WUBRG percentage-of-cards
+  breakdown) is used as an approximation instead - keys with a nonzero
+  value become the deck's `color_identity` for filtering. Archidekt's real
+  search response also carries `edhBracket` (WotC's official Commander
+  Bracket, 1-5) when a deck's author set one - confirmed live only ~15% of
+  decks do, and Moxfield's search API has no equivalent field at all, but
+  it was wired up as a real (if sparse) filter anyway since the data costs
+  nothing extra to capture and the user chose to build it despite the low
+  coverage once shown the real number.
 
 Both sources share one `PopularDeckEntry` shape
 (`app/source_adapters/common.py`) and sync into the same local
@@ -131,6 +150,52 @@ per-commander failures; a real import of the top-ranked synthesized deck
 parse errors (99 cards + commander) through the unmodified text-import
 pipeline.
 
+**CubeCobra (post-Phase-7, done, user-requested):**
+`app/source_adapters/cubecobra.py` — the cube-side counterpart to Moxfield/
+Archidekt discovery, filling the cube-support gap this doc used to describe
+as "not planned" (see below). CubeCobra has no documented public API, but is
+open source (github.com/dekkerglen/CubeCobra); its real routes were found by
+reading the actual server source (same technique that found Archidekt's
+real search API and EDHREC's real page-data shape), then verified live:
+
+- `POST /search/getmoresearchitems` — real cube search sorted by real like
+  count (`order: "pop"`), paginated via a DynamoDB `lastKey` cursor rather
+  than page numbers (`fetch_popular_cubes`).
+- `GET /cube/download/csv/{id}` — a real CSV export of one cube's actual
+  mainboard card list, accepting either a cube's real id or its human-
+  friendly shortId. Fed straight through the *existing* deck/cube CSV
+  parser (`app/parsers/list_csv.py`, Phase 5, IMPORT_FORMATS.md) via an
+  explicit `column_mapping` (CubeCobra's real headers - `Set`, `Collector
+  Number`, `Finish`, `board`, `tags` - line up with that parser's existing
+  header aliases almost exactly) plus one small adapter-local
+  pre-processing step: injecting a synthetic `Quantity=1` column, since
+  cubes have no quantity concept at all and the shared parser hard-requires
+  one. No new CSV parsing code was written for this.
+
+Same reasoning as EDHREC for keeping this a separate model/tab rather than
+folded into `PopularDeck`/Discover Decks: a cube isn't a deck (no format/
+color-identity the same way, has card_count/tags instead, and CubeCobra's
+only real popularity signal is likes - no separate view count). `PopularCube`
+(`app/models/cubecobra.py`), its own sync state, `GET /api/cube-discover/
+cubes` / `.../status` / `POST .../sync`, and its own frontend tab
+(`frontend/src/pages/DiscoverCubes.tsx`, "Discover Cubes"). One-click import
+(single or bulk) reuses the URL-import pipeline exactly like Moxfield/
+Archidekt (`cubecobra` registered in `ListImportSourceType` and
+`list_import_service.py`'s `URL_ADAPTERS`), unlike EDHREC's file-upload path
+- a `PopularCube.source_url` is a real, independently fetchable CubeCobra
+URL.
+
+A real sync (2026-08-11) cached 1,419 real cubes (~75 seconds); a real
+one-click import of "The Pauper Cube" (2,270 real likes, 450 real cards)
+landed 450/450 rows resolved with 0 errors. That same import also surfaced
+and fixed two real, unrelated bugs found live under real load - see
+CLAUDE.md gotchas #29 (a coincidental periodic-sync lock wait, not a real
+bug, but confusing without checking `pg_stat_activity` first) and #30 (a
+genuine `ILIKE`-without-wildcards full-table-scan in `app.services.
+scryfall_resolution`, fixed with a functional index - a 450-card cube
+spanning far more distinct real sets than a typical deck was the first
+import in this project's history to actually hit that hard).
+
 **MTGJSON (Phase 6, done):** implemented as `app/source_adapters/mtgjson.py`
 — a real price-data sync (`AllIdentifiers.json.xz` + `AllPricesToday.json`,
 see PRICING.md for the full join logic), its own `PriceSyncState`
@@ -140,12 +205,20 @@ queue Phase 6 reserved in `app/workers/run_worker.py`. Also doesn't
 implement the generic `SourceAdapter` protocol below — same reasoning as
 Scryfall's own sync (a bulk data-mirror sync doesn't need
 `validate_url`/`fetch_by_url`/`search`). **No direct Cardmarket API
-adapter was built**: Cardmarket's own API needs OAuth app
-registration/approval, real friction for a self-hosted hobby tool, and
-MTGJSON's `AllPricesToday.json` already relays real Cardmarket retail
-prices (EUR) without that — see PRICING.md and ARCHITECTURE.md "Documented
-default decisions". A direct adapter remains a real possible future
-addition if MTGJSON's relay ever proves insufficient.
+adapter was built**: originally deferred as "real friction for a self-
+hosted hobby tool" (OAuth 1.0a app registration/approval); re-researched
+live post-Phase-7 after a user question about condition/language/seller
+filtering, and the real current status is stronger than "friction" -
+Cardmarket's own help page states outright that new API applications
+aren't being accepted at all right now (confirmed live,
+help.cardmarket.com/en/cardmarket-api), so this isn't buildable today
+regardless of appetite for the OAuth 1.0a work. The API's real `Article`
+entity does carry exactly the per-listing condition/language/seller detail
+MTGJSON's relay lacks (confirmed from Cardmarket's own API docs), so if
+applications ever reopen this is worth revisiting - MTGJSON's
+`AllPricesToday.json` still relays real Cardmarket EUR retail *trend*
+prices without any of that in the meantime, see PRICING.md and
+ARCHITECTURE.md "Documented default decisions".
 
 ## Adapter interface
 
@@ -186,11 +259,11 @@ class SourceAdapter(Protocol):
 | Archidekt public URL | public_url | 5, done | Deck URLs only, no login |
 | Deck/cube CSV upload | file | 5, done | See IMPORT_FORMATS.md "Deck/cube CSV" |
 | MTGJSON | api | 6, done | Price data — see PRICING.md |
-| Moxfield + Archidekt deck discovery | api | post-7, done | Popular Commander decks only, no cubes, two sources merged — see above |
+| Moxfield + Archidekt deck discovery | api | post-7, done | Popular Commander decks only, two sources merged — see above |
 | EDHREC synthesized decks | scrape (`__NEXT_DATA__`) | post-7, done | Computed "average deck" per top-100 commander, not a real decklist — see above |
-| Cardmarket (direct API) | api | not planned | MTGJSON already relays real Cardmarket EUR retail data — see PRICING.md |
+| CubeCobra cube discovery + URL import | scrape (real routes found from source) | post-7, done | Popular cubes by real like count, plus a full URL-import adapter — see above |
+| Cardmarket (direct API) | api | not planned | Applications are currently closed entirely (confirmed live) - MTGJSON already relays real Cardmarket EUR retail data meanwhile, see PRICING.md |
 | Generic configurable source | api/public_url | not planned | No concrete need yet — not scheduled |
-| Moxfield/CubeCobra cube discovery | api | not planned | No public Moxfield cube-search API found; a CubeCobra adapter would be new, unverified work |
 
 ## Status values
 
@@ -231,13 +304,13 @@ already succeeded (see `app/services/list_refresh_service.py`).
   Wizards of the Coast.
 - **MTGJSON**: pricing/card data, where used, is provided by MTGJSON
   (mtgjson.com) under its terms.
-- **Moxfield / Archidekt**: decklist data fetched via public URLs is
-  attributed with a link back to the original list on every imported deck's
-  detail page.
+- **Moxfield / Archidekt / CubeCobra**: decklist/cube data fetched via
+  public URLs is attributed with a link back to the original list on every
+  imported deck/cube's detail page.
 
 ## Adding a new adapter
 
-For a URL-based list adapter (the Moxfield/Archidekt shape): implement
+For a URL-based list adapter (the Moxfield/Archidekt/CubeCobra shape): implement
 `validate_url`/`fetch_and_parse`/`attribution` (see `moxfield.py` for the
 minimal real shape — there's no `SourceAdapter` Protocol base class to
 inherit from, just a matching function signature) and add it to

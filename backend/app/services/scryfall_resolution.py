@@ -34,7 +34,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.collection import CollectionItem
@@ -84,7 +84,16 @@ def _match_by_set_and_number(
 
 
 def _match_oracle_id_by_name(db: Session, name: str) -> str | None:
-    stmt = select(ScryfallCard.oracle_id).where(ScryfallCard.name.ilike(name)).limit(1)
+    # `.ilike(name)` (no wildcards - this is an exact case-insensitive match,
+    # not a pattern search) can't use `name`'s plain B-tree index in
+    # Postgres, forcing a full sequential scan of all ~530k scryfall_cards
+    # rows on every unmatched name - confirmed live (EXPLAIN ANALYZE) at
+    # ~865ms worst case *per call*, found while importing a real 450-card
+    # CubeCobra cube (many more distinct sets than a typical deck, so many
+    # more rows hit this fallback than usual). `func.lower(name) ==
+    # name.lower()` instead uses the functional index below
+    # (ix_scryfall_cards_name_lower), turning that into an indexed lookup.
+    stmt = select(ScryfallCard.oracle_id).where(func.lower(ScryfallCard.name) == name.lower()).limit(1)
     return db.scalar(stmt)
 
 

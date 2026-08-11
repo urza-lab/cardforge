@@ -125,7 +125,7 @@ def test_fetch_popular_decks_paginates_and_dedupes(monkeypatch: pytest.MonkeyPat
 
     real_deck = {
         "id": 111, "name": "Real Deck", "owner": {"username": "Alice"},
-        "viewCount": 5000, "colors": {"W": 10, "U": 20, "B": 0, "R": 0, "G": 0},
+        "viewCount": 5000, "colors": {"W": 10, "U": 20, "B": 0, "R": 0, "G": 0}, "edhBracket": 3,
     }
 
     def fake_get(url: str, params: dict[str, object], headers: dict[str, str], timeout: float) -> httpx.Response:
@@ -151,6 +151,7 @@ def test_fetch_popular_decks_paginates_and_dedupes(monkeypatch: pytest.MonkeyPat
     assert deck.view_count == 5000
     assert deck.like_count == 0
     assert deck.color_identity == ["W", "U"]
+    assert deck.bracket == 3
 
 
 def test_fetch_popular_decks_raises_on_non_200(monkeypatch: pytest.MonkeyPatch):

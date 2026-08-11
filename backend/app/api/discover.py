@@ -12,9 +12,15 @@ router = APIRouter(prefix="/api/discover", tags=["discover"])
 
 @router.get("/decks", response_model=list[PopularDeckRead])
 def list_popular_decks(
-    sort: str = "views", color_identity: str | None = None, source: str | None = None, db: Session = Depends(get_db)
+    sort: str = "views",
+    color_identity: str | None = None,
+    source: str | None = None,
+    bracket: int | None = None,
+    db: Session = Depends(get_db),
 ) -> list[PopularDeckRead]:
-    decks = discover_service.list_popular_decks(db, sort=sort, color_identity=color_identity, source=source)
+    decks = discover_service.list_popular_decks(
+        db, sort=sort, color_identity=color_identity, source=source, bracket=bracket
+    )
     return [PopularDeckRead.model_validate(d) for d in decks]
 
 

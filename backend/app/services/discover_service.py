@@ -53,7 +53,20 @@ def trigger_sync(db: Session) -> DeckDiscoverySyncState:
     # scryfall_service.trigger_sync for the same pattern).
     from app.workers.jobs import sync_popular_decks
 
-    get_queue("default").enqueue(sync_popular_decks, job_timeout=300)
+    # 1800s: the original 900s estimate (Moxfield ~150s + Archidekt ~100s,
+    # from each adapter's per-request pacing constant times its page count)
+    # turned out wrong live - a real sync at the current pool sizes
+    # (Moxfield 50 pages/sort, Archidekt 200 pages) hit the 900s ceiling and
+    # got killed by RQ's JobTimeoutException with *nothing* committed (the
+    # delete-then-reinsert per source only commits once that source's whole
+    # fetch_popular_decks() call returns), even though isolated timing
+    # samples of both APIs during the same investigation showed nowhere
+    # near that per-request. Root cause wasn't nailed down (sustained-load
+    # server-side slowdown neither adapter's short isolated probe would
+    # trigger is the leading theory) - doubled the timeout to a value with
+    # real headroom over what was actually observed, rather than re-guessing
+    # a "should be enough" number a second time.
+    get_queue("default").enqueue(sync_popular_decks, job_timeout=1800)
     state.status = DeckDiscoverySyncStatus.fetching.value
     state.started_at = datetime.now(UTC)
     state.error_message = None
@@ -105,6 +118,7 @@ def run_discovery_sync(db: Session, settings: Settings | None = None) -> DeckDis
                         "view_count": d.view_count,
                         "like_count": d.like_count,
                         "color_identity": d.color_identity,
+                        "bracket": d.bracket,
                     }
                     for d in decks
                 ],
@@ -130,7 +144,12 @@ def run_discovery_sync(db: Session, settings: Settings | None = None) -> DeckDis
 
 
 def list_popular_decks(
-    db: Session, *, sort: str = "views", color_identity: str | None = None, source: str | None = None
+    db: Session,
+    *,
+    sort: str = "views",
+    color_identity: str | None = None,
+    source: str | None = None,
+    bracket: int | None = None,
 ) -> list[PopularDeck]:
     """`color_identity`, when given, is a set of WUBRG letters (e.g. "WU")
     - only decks whose own color identity is a subset of it are returned
@@ -141,11 +160,19 @@ def list_popular_decks(
     or "archidekt") - omitted, all sources are mixed together sorted by the
     same column (archidekt decks always sort last under "likes" since that
     source has no reliable like signal - see archidekt.fetch_popular_decks).
+    `bracket`, when given, is an exact match against WotC's Commander
+    Bracket (1-5) - only real for Archidekt-sourced decks that set one
+    (~15% of them, confirmed live); Moxfield decks and most Archidekt decks
+    have no bracket at all and are excluded when this filter is active,
+    same "omit rather than fabricate" reasoning as everywhere else real
+    data might just not exist for a given row.
     """
     order_column = PopularDeck.like_count if sort == "likes" else PopularDeck.view_count
     stmt = select(PopularDeck).order_by(order_column.desc())
     if source:
         stmt = stmt.where(PopularDeck.source == source)
+    if bracket is not None:
+        stmt = stmt.where(PopularDeck.bracket == bracket)
     decks = list(db.scalars(stmt))
 
     if color_identity:

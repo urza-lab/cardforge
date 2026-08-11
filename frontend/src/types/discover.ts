@@ -18,5 +18,6 @@ export interface PopularDeck {
   view_count: number;
   like_count: number;
   color_identity: string[] | null;
+  bracket: number | null;
   synced_at: string;
 }

@@ -335,7 +335,7 @@ export default function ListsImport() {
                 type="url"
                 className="cf-input"
                 style={{ width: "100%" }}
-                placeholder="https://moxfield.com/decks/... or https://archidekt.com/decks/..."
+                placeholder="https://moxfield.com/decks/..., https://archidekt.com/decks/..., or https://cubecobra.com/cube/list/..."
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
               />

@@ -28,7 +28,19 @@ def get_engine():
     if _engine is None:
         settings = get_settings()
         url = settings.database_url(get_db_password())
-        _engine = create_engine(url, pool_pre_ping=True, future=True)
+        # prepare_threshold=None disables psycopg3's server-side prepared-
+        # statement autoprepare/caching - found live (post-Phase-7, adding
+        # periodic background sync) when two large batch-INSERT syncs
+        # (Scryfall then MTGJSON) ran back-to-back in the same worker
+        # process: a pooled connection reused within milliseconds of its
+        # previous large executemany still had a server-side prepared
+        # statement active, and psycopg3's next auto-generated statement
+        # name ("_pg3_0") collided with it -
+        # psycopg.errors.DuplicatePreparedStatement. Manual, spaced-out
+        # syncs earlier in the project's life never hit this - only back-
+        # to-back automated syncs did. See CLAUDE.md gotcha and
+        # ARCHITECTURE.md.
+        _engine = create_engine(url, pool_pre_ping=True, future=True, connect_args={"prepare_threshold": None})
     return _engine
 
 
