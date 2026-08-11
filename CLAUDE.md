@@ -517,6 +517,30 @@ variant of collection leverage (ARCHITECTURE.md).
     bind-mount, confirmed live). Don't try to provision one via YAML; it has
     to be a one-time API call or UI action, with the resulting URL then
     handed to the app (here: pasted into Settings → `grafana_embed_url`).
+26. **`frontend/nginx.conf`'s `/api/` proxy resolved `backend`'s IP once at
+    nginx startup and cached it forever — recreating the `backend` container
+    without also restarting/rebuilding `frontend` made every `/api/*`
+    request 502 with "connect() failed (111: Connection refused)"** (a real
+    production outage during this session: `backend` had been rebuilt
+    several times for testing while `frontend` kept running, so nginx was
+    still holding backend's *previous* container IP). Fixed with Docker's
+    embedded DNS resolver (`resolver 127.0.0.11 valid=10s;`) plus a
+    `set $backend_upstream ...; proxy_pass $backend_upstream$request_uri;`
+    instead of a bare `proxy_pass http://backend:8000/api/;` — this forces
+    nginx to re-resolve `backend` on every request instead of once at
+    startup. **Gotcha within the gotcha, also found live**: nginx only does
+    its usual "replace the matched location prefix with the proxy_pass URI"
+    rewriting when `proxy_pass`'s target is a static string — the moment a
+    variable is involved (needed for the resolver fix above), that
+    rewriting silently stops happening and nginx appends *nothing* from the
+    original request to the proxied URL (every request landed on the
+    backend as a bare `/api/`, path completely dropped, surfacing as a wrong
+    307 redirect). `$request_uri` has to be appended explicitly whenever
+    `proxy_pass` uses a variable — don't reintroduce a bare `proxy_pass
+    $var;` without it. Verified live both ways: with the fix, recreating
+    `backend` alone (`docker compose up -d --force-recreate backend`, no
+    touching `frontend`) kept `/api/*` working end-to-end once backend
+    became healthy again.
 
 ## Principles to keep enforcing in later phases
 
