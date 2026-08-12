@@ -368,7 +368,16 @@
       "hint": "Ranked by how much buying each card would improve buildability across every deck/cube — see PRICING.md \"collection leverage\".",
       "quantityNeeded": "Copies needed",
       "listsNewlyBuildable": "Lists newly buildable",
-      "coverageGain": "Total coverage gain"
+      "coverageGain": "Total coverage gain",
+      "totalPrice": "Total price",
+      "filterMinLists": "Worth it",
+      "filterMinListsAny": "Any",
+      "filterMinListsAtLeast_one": "Completes ≥ {{count}} deck",
+      "filterMinListsAtLeast_other": "Completes ≥ {{count}} decks",
+      "filterMaxPrice": "Max. price",
+      "filterMaxPriceAny": "No limit",
+      "filterCount": "Showing {{shown}} of {{total}}",
+      "filterEmpty": "No candidates match these filters."
     },
     "grafana": {
       "title": "High-coverage decks (Grafana)",

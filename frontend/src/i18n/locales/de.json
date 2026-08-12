@@ -368,7 +368,16 @@
       "hint": "Sortiert danach, wie stark der Kauf jeder Karte die Baubarkeit über alle Decks/Cubes hinweg verbessern würde — siehe PRICING.md \"collection leverage\".",
       "quantityNeeded": "Benötigte Exemplare",
       "listsNewlyBuildable": "Neu baubare Listen",
-      "coverageGain": "Gesamter Abdeckungsgewinn"
+      "coverageGain": "Gesamter Abdeckungsgewinn",
+      "totalPrice": "Gesamtpreis",
+      "filterMinLists": "Lohnt sich",
+      "filterMinListsAny": "Alle",
+      "filterMinListsAtLeast_one": "Vervollständigt ≥ {{count}} Deck",
+      "filterMinListsAtLeast_other": "Vervollständigt ≥ {{count}} Decks",
+      "filterMaxPrice": "Max. Preis",
+      "filterMaxPriceAny": "Kein Limit",
+      "filterCount": "{{shown}} von {{total}} angezeigt",
+      "filterEmpty": "Keine Kandidaten entsprechen diesen Filtern."
     },
     "grafana": {
       "title": "Decks mit hoher Coverage (Grafana)",

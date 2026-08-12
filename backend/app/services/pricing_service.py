@@ -5,6 +5,7 @@ has nothing to do with any particular provider's sync job.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -23,6 +24,98 @@ from app.models.user import DEFAULT_USER_ID
 from app.pricing.budget import BudgetResult, PricedMissingCard, apply_budget
 
 VALID_PROVIDERS = {p.value for p in PriceProvider}
+
+# Postgres hard-caps a single query at 65535 bound parameters - an IN(...)
+# clause built from a real, large card-id set (hundreds of lists' worth of
+# missing/candidate cards, confirmed live to reach tens of thousands of
+# distinct ids, see CLAUDE.md gotcha #33) can exceed that and fail the
+# query outright, not just run slowly. Chunking well under the ceiling
+# keeps every batch safe regardless of how large the real set grows.
+_IN_CLAUSE_CHUNK_SIZE = 5000
+
+
+def _chunked(items: Iterable[str], size: int = _IN_CLAUSE_CHUNK_SIZE) -> Iterator[list[str]]:
+    chunk: list[str] = []
+    for item in items:
+        chunk.append(item)
+        if len(chunk) >= size:
+            yield chunk
+            chunk = []
+    if chunk:
+        yield chunk
+
+
+def batch_cheapest_prices(
+    db: Session, oracle_ids: Iterable[str], direct_card_ids: Iterable[str], profile: PriceProfile
+) -> tuple[dict[str, Decimal], dict[str, Decimal]]:
+    """Cheapest resolved price per `profile`'s provider priority/currency/
+    foil, for many oracle_ids and directly-keyed scryfall_card_ids at once
+    - a small constant number of chunked queries regardless of how many
+    ids are given, not one (or several) DB round-trips per card. Shared by
+    every caller that needs to price many candidate cards at once (the
+    Prometheus exporter's per-list cost rollup, the dashboard's "what to
+    buy next" pricing) - see CLAUDE.md gotchas #27/#33 for why a per-card
+    lookup doesn't scale here. Returns (price_by_oracle_id,
+    price_by_direct_card_id); ids with no resolvable price are simply
+    absent from the returned dicts.
+    """
+    oracle_id_set = set(oracle_ids)
+    direct_card_id_set = set(direct_card_ids)
+
+    # oracle_id -> every *priced* printing's scryfall_card_id (oracle-mode
+    # pricing takes the cheapest printing, same "any printing satisfies
+    # this" philosophy as oracle-mode comparison itself). A single JOINed
+    # query per oracle_id chunk, filtered to this profile's currency/foil
+    # up front, rather than first fetching *every* printing of every
+    # candidate oracle_id (confirmed live to reach 400k+ rows for ~24k
+    # oracle_ids - most of the real Scryfall mirror). Real decks/cubes only
+    # have prices for a fraction of all printings, so this join touches far
+    # fewer rows in practice.
+    printings_by_oracle: dict[str, list[str]] = {}
+    price_by_card_provider: dict[tuple[str, str], Decimal] = {}
+    for chunk in _chunked(oracle_id_set):
+        for oracle_id, card_id, provider, price in db.execute(
+            select(ScryfallCard.oracle_id, PriceObservation.scryfall_card_id, PriceObservation.provider, PriceObservation.price)
+            .join(PriceObservation, PriceObservation.scryfall_card_id == ScryfallCard.id)
+            .where(
+                ScryfallCard.oracle_id.in_(chunk),
+                PriceObservation.currency == profile.currency,
+                PriceObservation.foil == profile.prefer_foil,
+            )
+        ):
+            printings_by_oracle.setdefault(oracle_id, []).append(card_id)
+            price_by_card_provider[(card_id, provider)] = price
+
+    for chunk in _chunked(direct_card_id_set):
+        for card_id, provider, price in db.execute(
+            select(PriceObservation.scryfall_card_id, PriceObservation.provider, PriceObservation.price).where(
+                PriceObservation.scryfall_card_id.in_(chunk),
+                PriceObservation.currency == profile.currency,
+                PriceObservation.foil == profile.prefer_foil,
+            )
+        ):
+            price_by_card_provider[(card_id, provider)] = price
+
+    def cheapest_price(card_ids: list[str]) -> Decimal | None:
+        best: Decimal | None = None
+        for card_id in card_ids:
+            for provider in profile.provider_priority:
+                price = price_by_card_provider.get((card_id, provider))
+                if price is not None:
+                    if best is None or price < best:
+                        best = price
+                    break  # this printing's cheapest-available-provider price is settled - move on
+        return best
+
+    price_by_oracle = {
+        oracle_id: price
+        for oracle_id, ids in printings_by_oracle.items()
+        if (price := cheapest_price(ids)) is not None
+    }
+    price_by_direct = {
+        card_id: price for card_id in direct_card_id_set if (price := cheapest_price([card_id])) is not None
+    }
+    return price_by_oracle, price_by_direct
 
 
 class InvalidProviderPriorityError(ValueError):

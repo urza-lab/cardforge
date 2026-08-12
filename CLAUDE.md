@@ -1025,6 +1025,31 @@ variant of collection leverage (ARCHITECTURE.md).
     after truncation would silently return fewer than 10 real
     recommendations whenever a basic land would otherwise have placed.
 
+**"What to buy next" gained real price + filtering, and the Grafana embed
+was swapped to lead with its scatter plot, both user-requested after
+seeing the shipped basic-land-filter batch live.** `TOP_LEVERAGE_COUNT`
+bumped 10 → 100 (free - `compute_leverage` already computes every
+candidate, this only controls how much of the already-computed ranking is
+returned) and each candidate now carries a real `unit_price`/
+`total_price`/`currency`, priced with the same batched, chunked lookup
+`compute_list_missing_cost` already used (`pricing_service.
+batch_cheapest_prices` - extracted as a shared helper instead of a third
+copy of that logic, see gotcha #33's own IN-clause-chunking fix this
+builds on) rather than a per-candidate round trip. The Dashboard page
+gained a "worth it" filter (minimum lists-newly-buildable) and a max-price
+filter, both client-side over the now-100-deep candidate list, plus
+sortable columns matching the rest of the app's tables. Separately: the
+Grafana "High-Coverage Decks" dashboard already had a real scatter plot
+("Coverage vs. cost to complete", an `xychart` panel) below its plain
+coverage table, but the embedded iframe (480px tall) only ever showed the
+table - the scatter plot needed scrolling within the iframe to reach,
+which doesn't work well embedded. Swapped the two panels' `gridPos` so the
+scatter plot (the thing Grafana actually adds beyond what CardForge's own
+sortable "Decks & Cubes" page already shows) renders first. Also reordered
+the Dashboard page itself: Grafana embed moved up, "what to buy next"
+moved above the big list-buildability table - both direct user requests
+after using the shipped page.
+
 ## Principles to keep enforcing in later phases
 
 - **No AI/LLM anywhere in the core pipeline.** Import parsing, card

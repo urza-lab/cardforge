@@ -1,16 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { apiGet, ApiError } from "../api/client";
 import { useSort } from "../hooks/useSort";
-import type { DashboardSummary, ListBuildability } from "../types/dashboard";
+import type { DashboardSummary, LeverageCandidate, ListBuildability } from "../types/dashboard";
 import type { UserSettings } from "../types/settings";
+
+interface LeverageRow extends LeverageCandidate {
+  // Parsed once for numeric sorting/filtering - the API field itself stays
+  // a string (Decimal, see types/dashboard.ts) so it round-trips exactly.
+  total_price_num: number | null;
+}
 
 export default function Dashboard() {
   const { t } = useTranslation();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [grafanaEmbedUrl, setGrafanaEmbedUrl] = useState<string | null>(null);
+
+  const [minListsNewlyBuildable, setMinListsNewlyBuildable] = useState(0);
+  const [maxPrice, setMaxPrice] = useState("");
 
   const { sorted: sortedBuildability, sortKey, direction, toggleSort } = useSort<ListBuildability>(
     summary?.list_buildability ?? [],
@@ -21,6 +30,36 @@ export default function Dashboard() {
   function sortIndicator(key: keyof ListBuildability) {
     if (sortKey !== key) return "";
     return direction === "asc" ? " ▲" : " ▼";
+  }
+
+  const leverageRows: LeverageRow[] = useMemo(
+    () =>
+      (summary?.top_leverage ?? []).map((c) => ({
+        ...c,
+        total_price_num: c.total_price !== null ? Number(c.total_price) : null,
+      })),
+    [summary],
+  );
+
+  const filteredLeverage = useMemo(() => {
+    const maxPriceNum = maxPrice.trim() ? Number(maxPrice) : null;
+    return leverageRows.filter((c) => {
+      if (c.lists_newly_buildable < minListsNewlyBuildable) return false;
+      if (maxPriceNum !== null && (c.total_price_num === null || c.total_price_num > maxPriceNum)) return false;
+      return true;
+    });
+  }, [leverageRows, minListsNewlyBuildable, maxPrice]);
+
+  const {
+    sorted: sortedLeverage,
+    sortKey: leverageSortKey,
+    direction: leverageDirection,
+    toggleSort: toggleLeverageSort,
+  } = useSort<LeverageRow>(filteredLeverage, "lists_newly_buildable", "desc");
+
+  function leverageSortIndicator(key: keyof LeverageRow) {
+    if (leverageSortKey !== key) return "";
+    return leverageDirection === "asc" ? " ▲" : " ▼";
   }
 
   useEffect(() => {
@@ -82,25 +121,81 @@ export default function Dashboard() {
         <div className="cf-card">
           <h3 style={{ marginTop: 0 }}>{t("dashboardPage.leverage.title")}</h3>
           <p style={{ color: "var(--cf-muted)", marginTop: 0 }}>{t("dashboardPage.leverage.hint")}</p>
+
+          <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "flex-end", gap: 10 }}>
+            <div>
+              <label htmlFor="leverage-min-lists">{t("dashboardPage.leverage.filterMinLists")}</label>
+              <select
+                id="leverage-min-lists"
+                className="cf-select"
+                value={minListsNewlyBuildable}
+                onChange={(e) => setMinListsNewlyBuildable(Number(e.target.value))}
+              >
+                <option value={0}>{t("dashboardPage.leverage.filterMinListsAny")}</option>
+                <option value={1}>{t("dashboardPage.leverage.filterMinListsAtLeast", { count: 1 })}</option>
+                <option value={2}>{t("dashboardPage.leverage.filterMinListsAtLeast", { count: 2 })}</option>
+                <option value={3}>{t("dashboardPage.leverage.filterMinListsAtLeast", { count: 3 })}</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="leverage-max-price">{t("dashboardPage.leverage.filterMaxPrice")}</label>
+              <input
+                id="leverage-max-price"
+                className="cf-input"
+                style={{ width: 100 }}
+                type="number"
+                min={0}
+                step="0.01"
+                value={maxPrice}
+                onChange={(e) => setMaxPrice(e.target.value)}
+                placeholder={t("dashboardPage.leverage.filterMaxPriceAny")}
+              />
+            </div>
+            <div style={{ color: "var(--cf-muted)", paddingBottom: 8 }}>
+              {t("dashboardPage.leverage.filterCount", { shown: sortedLeverage.length, total: leverageRows.length })}
+            </div>
+          </div>
+
           <div className="cf-table-wrap">
             <table className="cf-table">
               <thead>
                 <tr>
                   <th>{t("comparisonsPage.columns.name")}</th>
-                  <th>{t("dashboardPage.leverage.quantityNeeded")}</th>
-                  <th>{t("dashboardPage.leverage.listsNewlyBuildable")}</th>
-                  <th>{t("dashboardPage.leverage.coverageGain")}</th>
+                  <th className="cf-th-sortable" onClick={() => toggleLeverageSort("quantity_needed")}>
+                    {t("dashboardPage.leverage.quantityNeeded")}
+                    {leverageSortIndicator("quantity_needed")}
+                  </th>
+                  <th className="cf-th-sortable" onClick={() => toggleLeverageSort("lists_newly_buildable")}>
+                    {t("dashboardPage.leverage.listsNewlyBuildable")}
+                    {leverageSortIndicator("lists_newly_buildable")}
+                  </th>
+                  <th className="cf-th-sortable" onClick={() => toggleLeverageSort("total_coverage_gain")}>
+                    {t("dashboardPage.leverage.coverageGain")}
+                    {leverageSortIndicator("total_coverage_gain")}
+                  </th>
+                  <th className="cf-th-sortable" onClick={() => toggleLeverageSort("total_price_num")}>
+                    {t("dashboardPage.leverage.totalPrice")}
+                    {leverageSortIndicator("total_price_num")}
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {summary.top_leverage.map((c) => (
+                {sortedLeverage.map((c) => (
                   <tr key={`${c.name}::${c.oracle_id ?? c.scryfall_card_id ?? ""}`}>
                     <td>{c.name}</td>
                     <td>{c.quantity_needed}</td>
                     <td>{c.lists_newly_buildable}</td>
                     <td>+{c.total_coverage_gain}%</td>
+                    <td>{c.total_price !== null ? `${Number(c.total_price).toFixed(2)} ${c.currency}` : "—"}</td>
                   </tr>
                 ))}
+                {sortedLeverage.length === 0 && (
+                  <tr>
+                    <td colSpan={5} style={{ color: "var(--cf-muted)" }}>
+                      {t("dashboardPage.leverage.filterEmpty")}
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

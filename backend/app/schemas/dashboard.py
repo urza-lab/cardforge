@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -24,6 +25,9 @@ class LeverageCandidateRead(BaseModel):
     quantity_needed: int
     lists_newly_buildable: int
     total_coverage_gain: float
+    unit_price: Decimal | None
+    total_price: Decimal | None
+    currency: str | None
 
 
 class DashboardSummaryRead(BaseModel):

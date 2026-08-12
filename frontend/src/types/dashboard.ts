@@ -13,6 +13,9 @@ export interface LeverageCandidate {
   quantity_needed: number;
   lists_newly_buildable: number;
   total_coverage_gain: number;
+  unit_price: string | null;
+  total_price: string | null;
+  currency: string | null;
 }
 
 export interface DashboardSummary {

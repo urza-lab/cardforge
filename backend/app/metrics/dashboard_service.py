@@ -8,7 +8,6 @@ separate calls itself.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -21,18 +20,20 @@ from app.comparison.engine import build_owned_pool, compare_pool
 from app.comparison.types import MissingCard, RequiredCard
 from app.models.collection import CollectionItem
 from app.models.lists import CardList
-from app.models.pricing import PriceObservation, PriceProvider, PriceSyncState
-from app.models.scryfall import SYNC_STATE_ID, ScryfallCard, ScryfallSyncState
+from app.models.pricing import PriceProvider, PriceSyncState
+from app.models.scryfall import SYNC_STATE_ID, ScryfallSyncState
 from app.models.user import DEFAULT_USER_ID
 from app.services import collection_service, pricing_service
 from app.services.comparison_service import _owned_cards, required_cards_by_list
 
-# Capped so a household with dozens of decks/cubes doesn't turn every
-# dashboard load into an O(candidates x lists) leverage computation over
-# an unbounded candidate set - see app.comparison.leverage's own note on
-# not being batched. 10 is enough to answer "what should I buy next", not
-# meant as an exhaustive report.
-TOP_LEVERAGE_COUNT = 10
+# The leverage computation itself (app.comparison.leverage) doesn't get any
+# more expensive by returning more of its already-computed candidates - the
+# full ranking is computed regardless, this just controls how much of it is
+# exposed. Bumped from an original 10 (enough for a fixed top-N display) to
+# 100 once the frontend gained client-side filtering (by min lists-newly-
+# buildable, max price) - user-requested, since filtering only 10 candidates
+# wasn't useful.
+TOP_LEVERAGE_COUNT = 100
 
 # Basic lands are never a real purchasing decision (unlimited supply, not
 # actually scarce) - user-requested exclusion from "what to buy next" after
@@ -48,26 +49,6 @@ _BASIC_LAND_NAMES = {
     "snow-covered plains", "snow-covered island", "snow-covered swamp",
     "snow-covered mountain", "snow-covered forest", "snow-covered wastes",
 }
-
-# Postgres hard-caps a single query at 65535 bound parameters - an IN(...)
-# clause built from a real, large card-id set (hundreds of lists' worth of
-# missing cards, confirmed live to reach tens of thousands of distinct ids,
-# see CLAUDE.md) can exceed that and fail the query outright, not just run
-# slowly. Chunking well under the ceiling keeps every batch safe regardless
-# of how large the real set grows.
-_IN_CLAUSE_CHUNK_SIZE = 5000
-
-
-def _chunked(items: Iterable[str], size: int = _IN_CLAUSE_CHUNK_SIZE) -> Iterator[list[str]]:
-    chunk: list[str] = []
-    for item in items:
-        chunk.append(item)
-        if len(chunk) >= size:
-            yield chunk
-            chunk = []
-    if chunk:
-        yield chunk
-
 
 @dataclass(frozen=True)
 class ListBuildability:
@@ -92,6 +73,28 @@ class ListMissingCost:
 
 
 @dataclass(frozen=True)
+class PricedLeverageCandidate:
+    """`LeverageCandidate` (app.comparison.leverage - a pure, DB/pricing-
+    free library, see ARCHITECTURE.md) plus real market price, added here
+    rather than on that dataclass itself so leverage.py stays pricing-
+    oblivious. `unit_price`/`total_price`/`currency` are None when no
+    price resolved for this card at all - shown as such in the UI (no fake
+    success), not silently omitted, since a human filtering this list by
+    price needs to know a candidate exists even if its price is unknown.
+    """
+
+    name: str
+    oracle_id: str | None
+    scryfall_card_id: str | None
+    quantity_needed: int
+    lists_newly_buildable: int
+    total_coverage_gain: float
+    unit_price: Decimal | None
+    total_price: Decimal | None
+    currency: str | None
+
+
+@dataclass(frozen=True)
 class DashboardSummary:
     collection_distinct_items: int
     collection_total_quantity: int
@@ -105,7 +108,7 @@ class DashboardSummary:
     mtgjson_sync_status: str
     mtgjson_price_count: int
     list_buildability: list[ListBuildability] = field(default_factory=list)
-    top_leverage: list[LeverageCandidate] = field(default_factory=list)
+    top_leverage: list[PricedLeverageCandidate] = field(default_factory=list)
 
 
 def compute_list_buildability(
@@ -172,67 +175,13 @@ def compute_list_missing_cost(
     direct_card_ids = {
         m.scryfall_card_id for lb in list_buildability for m in lb.missing if not m.oracle_id and m.scryfall_card_id
     }
-
-    # oracle_id -> every *priced* printing's scryfall_card_id (oracle-mode
-    # pricing takes the cheapest printing, same "any printing satisfies
-    # this" philosophy as oracle-mode comparison itself). A single JOINed
-    # query per oracle_id chunk, filtered to this profile's currency/foil
-    # up front, rather than first fetching *every* printing of every
-    # candidate oracle_id (confirmed live to reach 400k+ rows for ~24k
-    # oracle_ids - most of the real Scryfall mirror - see CLAUDE.md) and
-    # only then discovering which of those even have a price. Real decks/
-    # cubes only have prices for a fraction of all printings, so this join
-    # touches far fewer rows in practice.
-    printings_by_oracle: dict[str, list[str]] = {}
-    price_by_card_provider: dict[tuple[str, str], Decimal] = {}
-    for chunk in _chunked(oracle_ids):
-        for oracle_id, card_id, provider, price in db.execute(
-            select(ScryfallCard.oracle_id, PriceObservation.scryfall_card_id, PriceObservation.provider, PriceObservation.price)
-            .join(PriceObservation, PriceObservation.scryfall_card_id == ScryfallCard.id)
-            .where(
-                ScryfallCard.oracle_id.in_(chunk),
-                PriceObservation.currency == profile.currency,
-                PriceObservation.foil == profile.prefer_foil,
-            )
-        ):
-            printings_by_oracle.setdefault(oracle_id, []).append(card_id)
-            price_by_card_provider[(card_id, provider)] = price
-
-    for chunk in _chunked(direct_card_ids):
-        for card_id, provider, price in db.execute(
-            select(PriceObservation.scryfall_card_id, PriceObservation.provider, PriceObservation.price).where(
-                PriceObservation.scryfall_card_id.in_(chunk),
-                PriceObservation.currency == profile.currency,
-                PriceObservation.foil == profile.prefer_foil,
-            )
-        ):
-            price_by_card_provider[(card_id, provider)] = price
-
-    def cheapest_price(card_ids: list[str]) -> Decimal | None:
-        best: Decimal | None = None
-        for card_id in card_ids:
-            for provider in profile.provider_priority:
-                price = price_by_card_provider.get((card_id, provider))
-                if price is not None:
-                    if best is None or price < best:
-                        best = price
-                    break  # this printing's cheapest-available-provider price is settled - move on
-        return best
-
-    # Precomputed once per distinct oracle_id/card_id, not once per missing
-    # *line* - the same card can be missing from dozens of lists, and this
-    # loop previously recomputed its cheapest price from scratch every
-    # single time (confirmed live: ~255k missing lines across 590 real
-    # lists, but only ~24k distinct oracle_ids among them - a ~10x
-    # redundant-work factor, see CLAUDE.md).
-    cheapest_by_oracle = {oracle_id: cheapest_price(ids) for oracle_id, ids in printings_by_oracle.items()}
-    cheapest_by_card_id = {card_id: cheapest_price([card_id]) for card_id in direct_card_ids}
+    price_by_oracle, price_by_direct = pricing_service.batch_cheapest_prices(db, oracle_ids, direct_card_ids, profile)
 
     def price_for(missing: MissingCard) -> Decimal | None:
         if missing.oracle_id:
-            return cheapest_by_oracle.get(missing.oracle_id)
+            return price_by_oracle.get(missing.oracle_id)
         if missing.scryfall_card_id:
-            return cheapest_by_card_id.get(missing.scryfall_card_id)
+            return price_by_direct.get(missing.scryfall_card_id)
         return None
 
     results: list[ListMissingCost] = []
@@ -251,6 +200,43 @@ def compute_list_missing_cost(
             )
 
     return results
+
+
+def price_leverage_candidates(
+    db: Session, candidates: list[LeverageCandidate], *, user_id: int = DEFAULT_USER_ID
+) -> list[PricedLeverageCandidate]:
+    """Real market price per candidate (user-requested, so the "what to buy
+    next" table can be filtered by price, not just browsed as a fixed top-
+    10) - reuses the same batched, chunked lookup `compute_list_missing_cost`
+    uses (`pricing_service.batch_cheapest_prices`), not a per-candidate DB
+    round-trip, for the same reason: this can be dozens to hundreds of
+    candidates, not one.
+    """
+    profile = pricing_service.get_or_create_default_price_profile(db, user_id=user_id)
+    oracle_ids = {c.oracle_id for c in candidates if c.oracle_id}
+    direct_card_ids = {c.scryfall_card_id for c in candidates if not c.oracle_id and c.scryfall_card_id}
+    price_by_oracle, price_by_direct = pricing_service.batch_cheapest_prices(db, oracle_ids, direct_card_ids, profile)
+
+    priced: list[PricedLeverageCandidate] = []
+    for c in candidates:
+        unit_price = price_by_oracle.get(c.oracle_id) if c.oracle_id else None
+        if unit_price is None and c.scryfall_card_id:
+            unit_price = price_by_direct.get(c.scryfall_card_id)
+        total_price = unit_price * c.quantity_needed if unit_price is not None else None
+        priced.append(
+            PricedLeverageCandidate(
+                name=c.name,
+                oracle_id=c.oracle_id,
+                scryfall_card_id=c.scryfall_card_id,
+                quantity_needed=c.quantity_needed,
+                lists_newly_buildable=c.lists_newly_buildable,
+                total_coverage_gain=c.total_coverage_gain,
+                unit_price=unit_price,
+                total_price=total_price,
+                currency=profile.currency if unit_price is not None else None,
+            )
+        )
+    return priced
 
 
 def get_dashboard_summary(db: Session, user_id: int = DEFAULT_USER_ID) -> DashboardSummary:
@@ -277,7 +263,7 @@ def get_dashboard_summary(db: Session, user_id: int = DEFAULT_USER_ID) -> Dashbo
     leverage_candidates = [
         c for c in compute_leverage(owned, lists_required, settings) if c.name.strip().lower() not in _BASIC_LAND_NAMES
     ]
-    top_leverage = leverage_candidates[:TOP_LEVERAGE_COUNT]
+    top_leverage = price_leverage_candidates(db, leverage_candidates[:TOP_LEVERAGE_COUNT], user_id=user_id)
 
     scryfall_state = db.get(ScryfallSyncState, SYNC_STATE_ID)
     mtgjson_state = db.get(PriceSyncState, PriceProvider.mtgjson.value)

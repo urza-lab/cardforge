@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from app.core.database import get_sessionmaker
 from app.main import app
+from app.models.pricing import PriceObservation, PriceProvider
 from app.models.scryfall import ScryfallCard
 from fastapi.testclient import TestClient
 
@@ -78,6 +81,45 @@ def test_dashboard_leverage_ranks_card_completing_a_deck():
     assert candidate["name"] == "Sol Ring"
     assert candidate["lists_newly_buildable"] == 1
     assert candidate["quantity_needed"] == 1
+
+
+def test_dashboard_leverage_includes_real_price():
+    """User-requested: the "what to buy next" table needed a real price per
+    candidate so it can be filtered by price, not just browsed as a fixed
+    top-10 - see CLAUDE.md.
+    """
+    _seed_sol_ring()
+    _create_list_with_missing_sol_ring()
+    db = get_sessionmaker()()
+    try:
+        db.add(
+            PriceObservation(
+                scryfall_card_id=SOL_RING_ID, provider=PriceProvider.manual.value, currency="USD", foil=False,
+                price=Decimal("2.50"),
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    resp = client.get("/api/dashboard")
+    body = resp.json()
+    candidate = next(c for c in body["top_leverage"] if c["name"] == "Sol Ring")
+    assert candidate["unit_price"] == "2.50"
+    assert candidate["total_price"] == "2.50"
+    assert candidate["currency"] == "USD"
+
+
+def test_dashboard_leverage_unpriced_candidate_has_null_price():
+    _seed_sol_ring()
+    _create_list_with_missing_sol_ring()
+
+    resp = client.get("/api/dashboard")
+    body = resp.json()
+    candidate = next(c for c in body["top_leverage"] if c["name"] == "Sol Ring")
+    assert candidate["unit_price"] is None
+    assert candidate["total_price"] is None
+    assert candidate["currency"] is None
 
 
 def test_dashboard_leverage_excludes_basic_lands():
