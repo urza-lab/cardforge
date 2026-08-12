@@ -34,6 +34,21 @@ from app.services.comparison_service import _owned_cards, required_cards_by_list
 # meant as an exhaustive report.
 TOP_LEVERAGE_COUNT = 10
 
+# Basic lands are never a real purchasing decision (unlimited supply, not
+# actually scarce) - user-requested exclusion from "what to buy next" after
+# real data showed them dominating the ranking. Their raw numbers are
+# wildly inflated purely by how many copies real decks/cubes want in
+# aggregate (thousands, summed across hundreds of lists - confirmed live:
+# "buy 3094 Mountains" outranking single-copy, one-deck-completing cards
+# by coverage-gain alone), crowding out genuinely actionable signals with
+# advice nobody would act on. Filtered by exact (case-insensitive) name,
+# not oracle_id, since this list also includes ad-hoc/unresolved entries.
+_BASIC_LAND_NAMES = {
+    "plains", "island", "swamp", "mountain", "forest", "wastes",
+    "snow-covered plains", "snow-covered island", "snow-covered swamp",
+    "snow-covered mountain", "snow-covered forest", "snow-covered wastes",
+}
+
 # Postgres hard-caps a single query at 65535 bound parameters - an IN(...)
 # clause built from a real, large card-id set (hundreds of lists' worth of
 # missing cards, confirmed live to reach tens of thousands of distinct ids,
@@ -259,7 +274,10 @@ def get_dashboard_summary(db: Session, user_id: int = DEFAULT_USER_ID) -> Dashbo
         if list_buildability
         else 0.0
     )
-    top_leverage = compute_leverage(owned, lists_required, settings)[:TOP_LEVERAGE_COUNT]
+    leverage_candidates = [
+        c for c in compute_leverage(owned, lists_required, settings) if c.name.strip().lower() not in _BASIC_LAND_NAMES
+    ]
+    top_leverage = leverage_candidates[:TOP_LEVERAGE_COUNT]
 
     scryfall_state = db.get(ScryfallSyncState, SYNC_STATE_ID)
     mtgjson_state = db.get(PriceSyncState, PriceProvider.mtgjson.value)

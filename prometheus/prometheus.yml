@@ -4,10 +4,21 @@
 # target will show as "down" in Prometheus, which is expected and visible
 # rather than a silently fake "up".
 global:
-  scrape_interval: 30s
+  scrape_interval: 60s
 
 scrape_configs:
+  # scrape_timeout is explicit and generous (default would be 10s) - this
+  # endpoint's real computation time scales with real collection/list size
+  # (app.metrics.dashboard_service, see CLAUDE.md gotchas #32/#33) and
+  # already exceeded a bare 10s default once real data grew past ~1,400
+  # lists (confirmed live: ~13s), which silently broke every Grafana panel
+  # fed by this target ("No data", not an error) since Prometheus was
+  # discarding every scrape as a timeout. scrape_interval bumped to match -
+  # this data doesn't need sub-minute freshness, and scrape_timeout must
+  # stay below scrape_interval.
   - job_name: cardforge-backend
+    scrape_interval: 60s
+    scrape_timeout: 45s
     static_configs:
       - targets: ["backend:8000"]
     metrics_path: /metrics

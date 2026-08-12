@@ -78,3 +78,27 @@ def test_dashboard_leverage_ranks_card_completing_a_deck():
     assert candidate["name"] == "Sol Ring"
     assert candidate["lists_newly_buildable"] == 1
     assert candidate["quantity_needed"] == 1
+
+
+def test_dashboard_leverage_excludes_basic_lands():
+    """User-requested: basic lands are never a real purchasing decision
+    (unlimited real-world supply) and their raw coverage-gain numbers are
+    wildly inflated by aggregate quantity across many lists, crowding out
+    genuinely actionable single-copy signals - see CLAUDE.md.
+    """
+    _seed_sol_ring()
+    list_id = client.post("/api/lists", json={"name": "Lands Test", "list_type": "deck"}).json()["id"]
+    preview = client.post(
+        "/api/list-imports/preview",
+        data={"source_type": "text", "list_id": str(list_id)},
+        files={"file": ("deck.txt", b"1 Sol Ring\n10 Mountain\n5 Snow-Covered Island\n", "text/plain")},
+    ).json()
+    confirm = client.post(f"/api/list-imports/{preview['id']}/confirm", json={"skip_bad_rows": False})
+    assert confirm.status_code == 200
+
+    resp = client.get("/api/dashboard")
+    body = resp.json()
+    names = {c["name"] for c in body["top_leverage"]}
+    assert "Sol Ring" in names
+    assert "Mountain" not in names
+    assert "Snow-Covered Island" not in names

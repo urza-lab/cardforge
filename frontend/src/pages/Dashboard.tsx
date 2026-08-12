@@ -78,6 +78,51 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {summary.top_leverage.length > 0 && (
+        <div className="cf-card">
+          <h3 style={{ marginTop: 0 }}>{t("dashboardPage.leverage.title")}</h3>
+          <p style={{ color: "var(--cf-muted)", marginTop: 0 }}>{t("dashboardPage.leverage.hint")}</p>
+          <div className="cf-table-wrap">
+            <table className="cf-table">
+              <thead>
+                <tr>
+                  <th>{t("comparisonsPage.columns.name")}</th>
+                  <th>{t("dashboardPage.leverage.quantityNeeded")}</th>
+                  <th>{t("dashboardPage.leverage.listsNewlyBuildable")}</th>
+                  <th>{t("dashboardPage.leverage.coverageGain")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {summary.top_leverage.map((c) => (
+                  <tr key={`${c.name}::${c.oracle_id ?? c.scryfall_card_id ?? ""}`}>
+                    <td>{c.name}</td>
+                    <td>{c.quantity_needed}</td>
+                    <td>{c.lists_newly_buildable}</td>
+                    <td>+{c.total_coverage_gain}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="cf-card">
+        <h3 style={{ marginTop: 0 }}>{t("dashboardPage.grafana.title")}</h3>
+        {grafanaEmbedUrl ? (
+          <iframe
+            src={grafanaEmbedUrl}
+            title={t("dashboardPage.grafana.title")}
+            style={{ width: "100%", height: 480, border: "none", borderRadius: 6 }}
+          />
+        ) : (
+          <p style={{ color: "var(--cf-muted)", marginTop: 0 }}>
+            {t("dashboardPage.grafana.notConfigured")}{" "}
+            <Link to="/settings">{t("nav.settings")}</Link>.
+          </p>
+        )}
+      </div>
+
       <div className="cf-card">
         <h3 style={{ marginTop: 0 }}>{t("dashboardPage.lists")}</h3>
         <div className="cf-stat-row">
@@ -138,51 +183,6 @@ export default function Dashboard() {
           </div>
         )}
         {summary.list_buildability.length === 0 && <p>{t("dashboardPage.noLists")}</p>}
-      </div>
-
-      {summary.top_leverage.length > 0 && (
-        <div className="cf-card">
-          <h3 style={{ marginTop: 0 }}>{t("dashboardPage.leverage.title")}</h3>
-          <p style={{ color: "var(--cf-muted)", marginTop: 0 }}>{t("dashboardPage.leverage.hint")}</p>
-          <div className="cf-table-wrap">
-            <table className="cf-table">
-              <thead>
-                <tr>
-                  <th>{t("comparisonsPage.columns.name")}</th>
-                  <th>{t("dashboardPage.leverage.quantityNeeded")}</th>
-                  <th>{t("dashboardPage.leverage.listsNewlyBuildable")}</th>
-                  <th>{t("dashboardPage.leverage.coverageGain")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {summary.top_leverage.map((c) => (
-                  <tr key={`${c.name}::${c.oracle_id ?? c.scryfall_card_id ?? ""}`}>
-                    <td>{c.name}</td>
-                    <td>{c.quantity_needed}</td>
-                    <td>{c.lists_newly_buildable}</td>
-                    <td>+{c.total_coverage_gain}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      <div className="cf-card">
-        <h3 style={{ marginTop: 0 }}>{t("dashboardPage.grafana.title")}</h3>
-        {grafanaEmbedUrl ? (
-          <iframe
-            src={grafanaEmbedUrl}
-            title={t("dashboardPage.grafana.title")}
-            style={{ width: "100%", height: 480, border: "none", borderRadius: 6 }}
-          />
-        ) : (
-          <p style={{ color: "var(--cf-muted)", marginTop: 0 }}>
-            {t("dashboardPage.grafana.notConfigured")}{" "}
-            <Link to="/settings">{t("nav.settings")}</Link>.
-          </p>
-        )}
       </div>
 
       <div className="cf-card">

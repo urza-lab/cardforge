@@ -991,6 +991,39 @@ variant of collection leverage (ARCHITECTURE.md).
     count alone and were reset to unlinked, re-importable state) - see
     ARCHITECTURE.md for why "keep the real card lists, just fix the
     linking" was the right call rather than deleting anything.
+36. **Growth from a real user-triggered load test (gotcha #32's incident,
+    and the follow-up 808/703-cube import runs) pushed `/metrics` past
+    Prometheus's own bare 10s `scrape_timeout` default, silently breaking
+    every Grafana panel fed by it** - Grafana showed "No data", not an
+    error, since Prometheus was discarding every scrape as a timeout
+    rather than reporting a query failure. Confirmed live via Prometheus's
+    own `/api/v1/targets` (`"health":"down"`, `"lastError":"...context
+    deadline exceeded"`) - `/metrics` itself was healthy and returning
+    correct data (~13s at 1,446 real lists), just too slow for the
+    *default* timeout neither `prometheus.yml` nor gotcha #33's fix had
+    made explicit. Fixed by setting `scrape_interval`/`scrape_timeout`
+    explicitly and generously (60s / 45s, this data doesn't need sub-
+    minute freshness) rather than chasing the exporter's compute time down
+    further - `compute_list_buildability`'s remaining cost at this scale
+    is genuine per-list comparison work, not redundant computation like
+    gotchas #32/#33 found, so there's no more "free" algorithmic win left
+    without a materially bigger change (e.g. pushing comparison into SQL,
+    or caching the exporter's own output). Treat "does this background
+    job/scrape still fit its timeout" as something to re-check after any
+    further real data growth, the same lesson as gotcha #31.
+37. **User-requested: basic lands (Plains/Island/Swamp/Mountain/Forest/
+    Wastes, snow-covered variants included) are excluded from the
+    Dashboard's "what to buy next" leverage ranking** - confirmed via real
+    data that they dominated it purely because real decks/cubes want them
+    in bulk (thousands of copies summed across hundreds of lists inflates
+    `total_coverage_gain` far past any single-copy candidate), not because
+    buying them is a real decision anyone needs ranked advice on (unlike
+    every other card here, basic lands are never actually scarce).
+    Filtered by exact case-insensitive name in `app.metrics.
+    dashboard_service.get_dashboard_summary`, applied to the *full*
+    candidate list before truncating to `TOP_LEVERAGE_COUNT` - filtering
+    after truncation would silently return fewer than 10 real
+    recommendations whenever a basic land would otherwise have placed.
 
 ## Principles to keep enforcing in later phases
 
