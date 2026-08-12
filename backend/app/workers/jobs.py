@@ -66,6 +66,15 @@ def sync_popular_cubes() -> None:
         db.close()
 
 
+def run_full_cubecobra_scrape() -> None:
+    session_local = get_sessionmaker()
+    db = session_local()
+    try:
+        cube_discover_service.run_full_cube_scrape(db)
+    finally:
+        db.close()
+
+
 def sync_precon_decks() -> None:
     session_local = get_sessionmaker()
     db = session_local()

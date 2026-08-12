@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.schemas.cubecobra import CubeDiscoverySyncStatusRead, PopularCubeRead
+from app.schemas.cubecobra import CubeDiscoverySyncStatusRead, CubeFullScrapeStatusRead, PopularCubeRead
 from app.services import cube_discover_service
 
 router = APIRouter(prefix="/api/cube-discover", tags=["cube-discover"])
@@ -28,6 +28,26 @@ def trigger_sync(db: Session = Depends(get_db)) -> CubeDiscoverySyncStatusRead:
     except cube_discover_service.SyncAlreadyInProgressError as exc:
         raise HTTPException(status_code=409, detail="a cube discovery sync is already in progress") from exc
     return CubeDiscoverySyncStatusRead.model_validate(state)
+
+
+@router.get("/cubes/full-scrape/status", response_model=CubeFullScrapeStatusRead)
+def get_full_scrape_status(db: Session = Depends(get_db)) -> CubeFullScrapeStatusRead:
+    return CubeFullScrapeStatusRead.model_validate(cube_discover_service.get_full_scrape_state(db))
+
+
+@router.post("/cubes/full-scrape", response_model=CubeFullScrapeStatusRead, status_code=202)
+def trigger_full_scrape(db: Session = Depends(get_db)) -> CubeFullScrapeStatusRead:
+    """User-requested: a real, unbounded walk of CubeCobra's full catalog
+    (not just the top-N-by-popularity the regular sync above covers) - see
+    cube_discover_service.run_full_cube_scrape for why this can take an
+    unknown, potentially very long time and reports live progress instead
+    of an ETA.
+    """
+    try:
+        state = cube_discover_service.trigger_full_scrape(db)
+    except cube_discover_service.SyncAlreadyInProgressError as exc:
+        raise HTTPException(status_code=409, detail="a full cube scrape is already in progress") from exc
+    return CubeFullScrapeStatusRead.model_validate(state)
 
 
 @router.post("/cubes/{cube_id}/import", response_model=PopularCubeRead)

@@ -2,7 +2,7 @@
   "title": "CardForge — High-Coverage Decks",
   "uid": "cardforge-high-coverage",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 3,
   "editable": true,
   "timezone": "browser",
   "refresh": "5m",
@@ -17,6 +17,14 @@
         "description": "Where this Grafana instance can reach the CardForge web UI - used for the deck/cube links below. Change this if your CardForge isn't at the default LXC address.",
         "query": "http://docker.trusted.local:666",
         "current": { "value": "http://docker.trusted.local:666", "text": "http://docker.trusted.local:666" }
+      },
+      {
+        "name": "max_cube_cost",
+        "type": "textbox",
+        "label": "Max cost to complete (cubes)",
+        "description": "Upper bound (in the default price profile's currency) for the \"Cheapest cubes to complete\" panel below - user-requested. A plain number, substituted directly into that panel's PromQL query.",
+        "query": "100",
+        "current": { "value": "100", "text": "100" }
       }
     ]
   },
@@ -143,6 +151,75 @@
         "tooltip": { "mode": "single" },
         "legend": { "showLegend": true, "displayMode": "list", "placement": "bottom" }
       }
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Cheapest cubes to complete",
+      "description": "Real cost (default price profile - see PRICING.md) to buy every card still missing from each cube, cheapest first - \"what can I finish for the least money,\" user-requested. Capped by the \"Max cost to complete (cubes)\" variable above (default 100); raise it to see more, or widen it past every cube's cost to see all of them. Cube-only, since a deck's much smaller card count makes its completion cost a materially different (usually far cheaper) comparison - see cardforge_list_missing_cost's own docstring for why a cube is only listed once every one of its missing cards actually resolved a real price, never a partial/estimated total.",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 26 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "expr": "cardforge_list_coverage_percent{list_type=\"cube\"}", "instant": true, "format": "table", "refId": "A" },
+        { "expr": "cardforge_list_missing_cost{list_type=\"cube\"} < $max_cube_cost", "instant": true, "format": "table", "refId": "B" }
+      ],
+      "transformations": [
+        {
+          "id": "joinByField",
+          "options": { "byField": "list_id", "mode": "inner" }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time 1": true, "Time 2": true, "__name__ 1": true, "__name__ 2": true,
+              "instance 1": true, "instance 2": true, "job 1": true, "job 2": true,
+              "list_type 1": true, "list_type 2": true, "list_name 2": true
+            },
+            "indexByName": {},
+            "renameByName": {
+              "list_name 1": "Cube", "Value #A": "Coverage %", "Value #B": "Cost to complete", "currency": "Currency"
+            }
+          }
+        },
+        {
+          "id": "sortBy",
+          "options": { "fields": {}, "sort": [{ "field": "Cost to complete", "desc": false }] }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "align": "auto", "cellOptions": { "type": "auto" } } },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "list_id" },
+            "properties": [{ "id": "custom.hidden", "value": true }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Coverage %" },
+            "properties": [{ "id": "unit", "value": "percent" }, { "id": "min", "value": 0 }, { "id": "max", "value": 100 }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Cost to complete" },
+            "properties": [{ "id": "unit", "value": "currencyUSD" }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "Cube" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open in CardForge",
+                    "url": "${app_base_url}/lists/${__data.fields.list_id}",
+                    "targetBlank": true
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": { "showHeader": true, "cellHeight": "sm" }
     }
   ]
 }

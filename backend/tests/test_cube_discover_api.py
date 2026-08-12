@@ -78,6 +78,24 @@ def test_list_cubes_empty():
     assert resp.json() == []
 
 
+def test_full_scrape_status_starts_inactive():
+    resp = client.get("/api/cube-discover/cubes/full-scrape/status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "INACTIVE"
+    assert body["cubes_found"] == 0
+    assert body["pages_fetched"] == 0
+
+
+def test_trigger_full_scrape_marks_running_and_rejects_concurrent():
+    resp = client.post("/api/cube-discover/cubes/full-scrape")
+    assert resp.status_code == 202
+    assert resp.json()["status"] == "RUNNING"
+
+    second = client.post("/api/cube-discover/cubes/full-scrape")
+    assert second.status_code == 409
+
+
 def test_list_cubes_sorted_by_likes_and_cards():
     _seed_cube(external_id="a", name="A", like_count=50, card_count=500)
     _seed_cube(external_id="b", name="B", like_count=500, card_count=100)

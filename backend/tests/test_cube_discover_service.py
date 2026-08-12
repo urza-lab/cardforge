@@ -81,6 +81,114 @@ def test_run_cube_discovery_sync_preserves_import_state_across_resync(monkeypatc
         db.close()
 
 
+def test_run_full_cube_scrape_success_tracks_progress(monkeypatch: pytest.MonkeyPatch):
+    def fake_iter_all_cubes(user_agent: str):
+        yield [_entry("a"), _entry("b")]
+        yield [_entry("c")]
+
+    monkeypatch.setattr(cube_discover_service.cubecobra, "iter_all_cubes", fake_iter_all_cubes)
+
+    db = get_sessionmaker()()
+    try:
+        state = cube_discover_service.run_full_cube_scrape(db)
+        assert state.status == "COMPLETED"
+        assert state.cubes_found == 3
+        assert state.pages_fetched == 2
+        assert state.last_progress_at is not None
+        assert state.finished_at is not None
+
+        cubes = db.query(PopularCube).all()
+        assert {c.external_id for c in cubes} == {"a", "b", "c"}
+    finally:
+        db.close()
+
+
+def test_run_full_cube_scrape_upserts_without_duplicates(monkeypatch: pytest.MonkeyPatch):
+    """The same cube can legitimately reappear across pages (or across a
+    retried scrape) - must update the existing row, never insert a second
+    one, since external_id is the real, stable identity CubeCobra itself
+    uses (see PopularCube's own unique constraint).
+    """
+
+    def fake_iter_all_cubes(user_agent: str):
+        yield [_entry("a", name="Old Name")]
+        yield [_entry("a", name="New Name")]  # same external_id, real update
+
+    monkeypatch.setattr(cube_discover_service.cubecobra, "iter_all_cubes", fake_iter_all_cubes)
+
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.run_full_cube_scrape(db)
+        cubes = db.query(PopularCube).filter_by(external_id="a").all()
+        assert len(cubes) == 1
+        assert cubes[0].name == "New Name"
+    finally:
+        db.close()
+
+
+def test_run_full_cube_scrape_preserves_import_state(monkeypatch: pytest.MonkeyPatch):
+    """Unlike the regular sync's delete-then-reinsert (which needs an
+    explicit snapshot/restore), the full scrape's upsert never touches
+    imported_list_id/import_error/import_attempted_at at all - they should
+    survive a rescrape for free, simply by never being in the upsert's
+    `set_` clause.
+    """
+    monkeypatch.setattr(cube_discover_service.cubecobra, "fetch_popular_cubes", lambda user_agent, **kw: [_entry("a")])
+
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.run_cube_discovery_sync(db)
+        cube = db.query(PopularCube).filter_by(external_id="a").one()
+        card_list = list_service.create_list(db, name="Cube a", list_type="cube")
+        cube.imported_list_id = card_list.id
+        db.commit()
+
+        def fake_iter_all_cubes(user_agent: str):
+            yield [_entry("a", name="Rescraped Name")]
+
+        monkeypatch.setattr(cube_discover_service.cubecobra, "iter_all_cubes", fake_iter_all_cubes)
+        cube_discover_service.run_full_cube_scrape(db)
+
+        rescraped = db.query(PopularCube).filter_by(external_id="a").one()
+        assert rescraped.id == cube.id  # same row, not a new one - proves this was a real upsert
+        assert rescraped.name == "Rescraped Name"
+        assert rescraped.imported_list_id == card_list.id
+    finally:
+        db.close()
+
+
+def test_run_full_cube_scrape_failure_records_error(monkeypatch: pytest.MonkeyPatch):
+    def fake_iter_all_cubes(user_agent: str):
+        yield [_entry("a")]
+        raise SourceFetchError("connection reset")
+
+    monkeypatch.setattr(cube_discover_service.cubecobra, "iter_all_cubes", fake_iter_all_cubes)
+
+    db = get_sessionmaker()()
+    try:
+        with pytest.raises(SourceFetchError):
+            cube_discover_service.run_full_cube_scrape(db)
+
+        state = cube_discover_service.get_full_scrape_state(db)
+        assert state.status == "FAILED"
+        assert "connection reset" in (state.error_message or "")
+        # The page fetched before the failure must still be committed - a
+        # crash partway through must not lose progress already made.
+        assert db.query(PopularCube).filter_by(external_id="a").one_or_none() is not None
+    finally:
+        db.close()
+
+
+def test_trigger_full_scrape_rejects_concurrent_run():
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.trigger_full_scrape(db)
+        with pytest.raises(cube_discover_service.SyncAlreadyInProgressError):
+            cube_discover_service.trigger_full_scrape(db)
+    finally:
+        db.close()
+
+
 def _fetch_result(rows: list[tuple[str, int]]) -> DeckFetchResult:
     parse_result = ParseResult(
         rows=[

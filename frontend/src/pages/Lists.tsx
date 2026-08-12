@@ -8,12 +8,15 @@ import type { CardList, ListType } from "../types/lists";
 
 interface CardListRow extends CardList {
   coverage_percent: number | null;
+  missing_cost: number | null;
+  missing_cost_currency: string | null;
 }
 
 export default function Lists() {
   const { t } = useTranslation();
   const [lists, setLists] = useState<CardList[] | null>(null);
   const [coverageByListId, setCoverageByListId] = useState<Record<number, number>>({});
+  const [costByListId, setCostByListId] = useState<Record<number, { total_cost: number; currency: string }>>({});
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [listType, setListType] = useState<ListType>("deck");
@@ -47,9 +50,22 @@ export default function Lists() {
         const map: Record<number, number> = {};
         for (const lb of summary.list_buildability) map[lb.list_id] = lb.coverage_percent;
         setCoverageByListId(map);
+
+        // Same reuse as coverage above - an "indicative first guess" price
+        // per list (user-requested), riding the dashboard's own 60s cache
+        // instead of a fresh per-request computation, so it loads fast. A
+        // list missing here (not an error) means at least one of its
+        // missing cards has no resolved price - see compute_list_missing_cost's
+        // own docstring for why it's omitted rather than shown as a
+        // misleadingly-partial total.
+        const costMap: Record<number, { total_cost: number; currency: string }> = {};
+        for (const mc of summary.list_missing_cost) {
+          costMap[mc.list_id] = { total_cost: Number(mc.total_cost), currency: mc.currency };
+        }
+        setCostByListId(costMap);
       })
       .catch(() => {
-        // Coverage column just stays empty if this fails - not fatal to the page.
+        // Coverage/cost columns just stay empty if this fails - not fatal to the page.
       });
   }
 
@@ -59,8 +75,13 @@ export default function Lists() {
     () =>
       (lists ?? [])
         .filter((l) => typeFilter === "all" || l.list_type === typeFilter)
-        .map((l) => ({ ...l, coverage_percent: coverageByListId[l.id] ?? null })),
-    [lists, coverageByListId, typeFilter],
+        .map((l) => ({
+          ...l,
+          coverage_percent: coverageByListId[l.id] ?? null,
+          missing_cost: costByListId[l.id]?.total_cost ?? null,
+          missing_cost_currency: costByListId[l.id]?.currency ?? null,
+        })),
+    [lists, coverageByListId, costByListId, typeFilter],
   );
 
   const { sorted, sortKey, direction, toggleSort } = useSort<CardListRow>(rows, "created_at", "desc");
@@ -248,6 +269,10 @@ export default function Lists() {
                       {t("listsPage.columns.coverage")}
                       {sortIndicator("coverage_percent")}
                     </th>
+                    <th className="cf-th-sortable" onClick={() => toggleSort("missing_cost")}>
+                      {t("listsPage.columns.costToComplete")}
+                      {sortIndicator("missing_cost")}
+                    </th>
                     <th>{t("sourcesPage.columns.status")}</th>
                   </tr>
                 </thead>
@@ -267,6 +292,11 @@ export default function Lists() {
                       <td>{t(`listsPage.types.${item.list_type}`)}</td>
                       <td>{new Date(item.created_at).toLocaleDateString()}</td>
                       <td>{item.coverage_percent !== null ? `${item.coverage_percent.toFixed(0)}%` : "—"}</td>
+                      <td>
+                        {item.missing_cost !== null
+                          ? `${item.missing_cost.toFixed(2)} ${item.missing_cost_currency}`
+                          : "—"}
+                      </td>
                       <td>
                         {item.source_url && (
                           <span

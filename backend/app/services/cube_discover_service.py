@@ -9,14 +9,18 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from app.core.config import Settings, get_settings
 from app.core.queue import get_queue
 from app.models.cubecobra import (
     CUBE_DISCOVERY_SYNC_STATE_ID,
+    CUBE_FULL_SCRAPE_STATE_ID,
     CubeDiscoverySyncState,
     CubeDiscoverySyncStatus,
+    CubeFullScrapeState,
+    CubeFullScrapeStatus,
     PopularCube,
 )
 from app.models.lists import CardList, CardListItem
@@ -125,6 +129,123 @@ def run_cube_discovery_sync(db: Session, settings: Settings | None = None) -> Cu
         db.rollback()
         state = get_sync_state(db)
         state.status = CubeDiscoverySyncStatus.failed.value
+        state.error_message = str(exc)[:1024]
+        state.finished_at = datetime.now(UTC)
+        db.commit()
+        raise
+
+    return state
+
+
+def get_full_scrape_state(db: Session) -> CubeFullScrapeState:
+    state = db.get(CubeFullScrapeState, CUBE_FULL_SCRAPE_STATE_ID)
+    if state is None:
+        raise RuntimeError("cube_full_scrape_state row is missing - has the migration been applied?")
+    return state
+
+
+def trigger_full_scrape(db: Session) -> CubeFullScrapeState:
+    state = get_full_scrape_state(db)
+    if state.status == CubeFullScrapeStatus.running.value:
+        raise SyncAlreadyInProgressError
+
+    from app.workers.jobs import run_full_cubecobra_scrape
+
+    # No real total is knowable in advance (CubeCobra has no count endpoint)
+    # so there's no principled way to size a timeout against "how long the
+    # whole thing takes" the way other syncs' job_timeout values are sized -
+    # a generous, effectively-non-binding ceiling (7 days) is used instead,
+    # purely as a safety net against a truly stuck job, not a real estimate.
+    get_queue("default").enqueue(run_full_cubecobra_scrape, job_timeout=604800)
+    state.status = CubeFullScrapeStatus.running.value
+    state.started_at = datetime.now(UTC)
+    state.finished_at = None
+    state.last_progress_at = None
+    state.cubes_found = 0
+    state.pages_fetched = 0
+    state.error_message = None
+    db.commit()
+    db.refresh(state)
+    return state
+
+
+def run_full_cube_scrape(db: Session, settings: Settings | None = None) -> CubeFullScrapeState:
+    """The real, user-requested "pull everything CubeCobra will give us"
+    scrape - walks app.source_adapters.cubecobra.iter_all_cubes to genuine
+    exhaustion (its lastKey cursor running out), not the bounded, top-N-by-
+    popularity walk `run_cube_discovery_sync` above does. Upserts each page
+    by `external_id` (PopularCube's own unique constraint) rather than the
+    regular sync's delete-then-reinsert - this can run far longer than that
+    one page's own request, and a worker restart/crash partway through
+    should never lose cubes already found, nor ever create duplicates of a
+    cube seen more than once across pages or across scrapes.
+    """
+    settings = settings or get_settings()
+    state = get_full_scrape_state(db)
+
+    state.status = CubeFullScrapeStatus.running.value
+    state.started_at = datetime.now(UTC)
+    state.finished_at = None
+    state.error_message = None
+    db.commit()
+
+    try:
+        for page in cubecobra.iter_all_cubes(settings.scryfall_user_agent):
+            if page:
+                now = datetime.now(UTC)
+                stmt = pg_insert(PopularCube).values(
+                    [
+                        {
+                            "external_id": c.external_id,
+                            "short_id": c.short_id,
+                            "name": c.name,
+                            "owner_username": c.owner_username,
+                            "source_url": c.source_url,
+                            "card_count": c.card_count,
+                            "like_count": c.like_count,
+                            "tags": c.tags,
+                            "num_decks": c.num_decks,
+                            "date_last_updated": c.date_last_updated,
+                            "synced_at": now,
+                        }
+                        for c in page
+                    ]
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=[PopularCube.external_id],
+                    set_={
+                        "short_id": stmt.excluded.short_id,
+                        "name": stmt.excluded.name,
+                        "owner_username": stmt.excluded.owner_username,
+                        "source_url": stmt.excluded.source_url,
+                        "card_count": stmt.excluded.card_count,
+                        "like_count": stmt.excluded.like_count,
+                        "tags": stmt.excluded.tags,
+                        "num_decks": stmt.excluded.num_decks,
+                        "date_last_updated": stmt.excluded.date_last_updated,
+                        "synced_at": stmt.excluded.synced_at,
+                        # imported_list_id/import_error/import_attempted_at
+                        # deliberately left untouched by this upsert - same
+                        # "don't reset real import-tracking state on a
+                        # routine resync" reasoning as run_cube_discovery_sync's
+                        # snapshot/restore above, just achieved for free here
+                        # by simply never including them in `set_`.
+                    },
+                )
+                db.execute(stmt)
+
+            state.cubes_found += len(page)
+            state.pages_fetched += 1
+            state.last_progress_at = datetime.now(UTC)
+            db.commit()
+
+        state.status = CubeFullScrapeStatus.completed.value
+        state.finished_at = datetime.now(UTC)
+        db.commit()
+    except Exception as exc:  # noqa: BLE001 - any failure must be recorded, not silently swallowed
+        db.rollback()
+        state = get_full_scrape_state(db)
+        state.status = CubeFullScrapeStatus.failed.value
         state.error_message = str(exc)[:1024]
         state.finished_at = datetime.now(UTC)
         db.commit()

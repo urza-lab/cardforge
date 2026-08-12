@@ -21,8 +21,10 @@ from __future__ import annotations
 import csv
 import io
 import time
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlparse
 
 import httpx
@@ -163,18 +165,65 @@ def attribution(cube_url: str) -> str:
     return f"Imported from CubeCobra: {cube_url}"
 
 
+def _map_cube_entry(c: dict[str, Any]) -> PopularCubeEntry | None:
+    cube_id = c.get("id")
+    if not cube_id:
+        return None
+    short_id = c.get("shortId") or cube_id
+    date_last_updated_ms = c.get("dateLastUpdated")
+    return PopularCubeEntry(
+        external_id=str(cube_id),
+        short_id=str(short_id),
+        name=c.get("name") or "(untitled)",
+        owner_username=(c.get("owner") or {}).get("username"),
+        source_url=f"https://cubecobra.com/cube/list/{short_id}",
+        card_count=c.get("cardCount") or 0,
+        like_count=c.get("likeCount") or 0,
+        tags=c.get("tags") or None,
+        num_decks=c.get("numDecks"),
+        date_last_updated=(
+            datetime.fromtimestamp(date_last_updated_ms / 1000, tz=UTC) if date_last_updated_ms else None
+        ),
+    )
+
+
 def fetch_popular_cubes(user_agent: str, *, pages: int = POPULAR_CUBES_PAGES) -> list[PopularCubeEntry]:
     """Real public data from CubeCobra's own search, sorted by real like
     count - see module docstring for the endpoint. Paginated via lastKey
     (a DynamoDB cursor, not a page number), so this must walk pages in
     order rather than fetching them independently.
     """
-    headers = {"User-Agent": user_agent, "Content-Type": "application/json", "Accept": "application/json"}
     entries: list[PopularCubeEntry] = []
-    last_key: object | None = None
+    for page in iter_all_cubes(user_agent, max_pages=pages):
+        entries.extend(page)
+    return entries
 
-    for page in range(pages):
-        if page > 0:
+
+def iter_all_cubes(user_agent: str, *, max_pages: int | None = None) -> Iterator[list[PopularCubeEntry]]:
+    """Walks CubeCobra's real search API to genuine exhaustion (until its
+    `lastKey` cursor runs out), not stopping at a fixed page count like
+    `fetch_popular_cubes` does - user-requested full-catalog scrape, since
+    "browse by popularity, N pages deep" can structurally never reach an
+    obscure/unliked cube no matter how deep N is (confirmed live against a
+    real 0-like, 0-deck cube a user linked - see CLAUDE.md). `max_pages`
+    exists only so `fetch_popular_cubes` above can reuse this same walk
+    logic with its existing bound; the real full-scrape caller leaves it
+    unset.
+
+    A generator, not a function returning the full list, so a caller
+    (cube_discover_service.run_full_cube_scrape) can persist progress
+    incrementally instead of only at the end - there is no way to know the
+    real total cube count in advance (CubeCobra exposes no count endpoint),
+    so this can run for an unknown, potentially very long time, and a
+    worker restart or crash partway through should lose at most the
+    in-flight page, not everything found so far.
+    """
+    headers = {"User-Agent": user_agent, "Content-Type": "application/json", "Accept": "application/json"}
+    last_key: object | None = None
+    page_num = 0
+
+    while max_pages is None or page_num < max_pages:
+        if page_num > 0:
             time.sleep(POPULAR_CUBES_REQUEST_DELAY_SECONDS)
 
         resp = httpx.post(
@@ -184,38 +233,17 @@ def fetch_popular_cubes(user_agent: str, *, pages: int = POPULAR_CUBES_PAGES) ->
             timeout=30,
         )
         if resp.status_code != 200:
-            raise SourceFetchError(f"CubeCobra popular-cubes search returned HTTP {resp.status_code} (page={page})")
+            raise SourceFetchError(f"CubeCobra cube search returned HTTP {resp.status_code} (page={page_num})")
 
         data = resp.json()
-        cubes = data.get("cubes") or []
-        if not cubes:
-            break
+        cubes_raw = data.get("cubes") or []
+        if not cubes_raw:
+            return
 
-        for c in cubes:
-            cube_id = c.get("id")
-            if not cube_id:
-                continue
-            short_id = c.get("shortId") or cube_id
-            date_last_updated_ms = c.get("dateLastUpdated")
-            entries.append(
-                PopularCubeEntry(
-                    external_id=str(cube_id),
-                    short_id=str(short_id),
-                    name=c.get("name") or "(untitled)",
-                    owner_username=(c.get("owner") or {}).get("username"),
-                    source_url=f"https://cubecobra.com/cube/list/{short_id}",
-                    card_count=c.get("cardCount") or 0,
-                    like_count=c.get("likeCount") or 0,
-                    tags=c.get("tags") or None,
-                    num_decks=c.get("numDecks"),
-                    date_last_updated=(
-                        datetime.fromtimestamp(date_last_updated_ms / 1000, tz=UTC) if date_last_updated_ms else None
-                    ),
-                )
-            )
+        page = [entry for c in cubes_raw if (entry := _map_cube_entry(c)) is not None]
+        yield page
 
+        page_num += 1
         last_key = data.get("lastKey")
         if not last_key:
-            break
-
-    return entries
+            return

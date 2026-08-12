@@ -2,9 +2,20 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { apiGet, apiPostJson, ApiError } from "../api/client";
-import type { CubeDiscoverySyncStatusRead, PopularCube } from "../types/cubecobra";
+import type { CubeDiscoverySyncStatusRead, CubeFullScrapeStatusRead, PopularCube } from "../types/cubecobra";
 
 const POLL_INTERVAL_MS = 3000;
+const FULL_SCRAPE_POLL_INTERVAL_MS = 5000;
+
+function formatDuration(seconds: number): string {
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
 
 async function importCube(cubeId: number): Promise<PopularCube | { error: string }> {
   try {
@@ -40,6 +51,64 @@ export default function DiscoverCubes() {
   const [retryAllProgress, setRetryAllProgress] = useState<{ done: number; total: number; startedAt: number } | null>(
     null,
   );
+
+  const [fullScrapeStatus, setFullScrapeStatus] = useState<CubeFullScrapeStatusRead | null>(null);
+  const [fullScrapeError, setFullScrapeError] = useState<string | null>(null);
+  const [fullScrapeStarting, setFullScrapeStarting] = useState(false);
+  // Ticks once a second while running so "elapsed"/"avg per cube" count up
+  // smoothly instead of only jumping every poll interval - same pattern as
+  // the Dashboard's own refresh-countdown disclaimer.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  const fetchFullScrapeStatus = () => {
+    apiGet<CubeFullScrapeStatusRead>("/cube-discover/cubes/full-scrape/status")
+      .then(setFullScrapeStatus)
+      .catch(() => {
+        // Non-fatal - this section just stays unavailable if it fails.
+      });
+  };
+
+  useEffect(fetchFullScrapeStatus, []);
+
+  useEffect(() => {
+    if (fullScrapeStatus?.status !== "RUNNING") return;
+    // Refresh the cube list itself too, not just the scrape's own counters
+    // - user-requested live updates directly on this page, so newly found
+    // cubes appear in the table below as the scrape progresses, not only
+    // once it's fully done.
+    const pollId = setInterval(() => {
+      fetchFullScrapeStatus();
+      fetchCubes();
+    }, FULL_SCRAPE_POLL_INTERVAL_MS);
+    const tickId = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => {
+      clearInterval(pollId);
+      clearInterval(tickId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullScrapeStatus?.status]);
+
+  async function handleStartFullScrape() {
+    setFullScrapeStarting(true);
+    setFullScrapeError(null);
+    try {
+      const resp = await apiPostJson<CubeFullScrapeStatusRead>("/cube-discover/cubes/full-scrape", {});
+      setFullScrapeStatus(resp);
+    } catch (err) {
+      setFullScrapeError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setFullScrapeStarting(false);
+    }
+  }
+
+  const fullScrapeElapsedSeconds =
+    fullScrapeStatus?.started_at && fullScrapeStatus.status === "RUNNING"
+      ? (nowTick - new Date(fullScrapeStatus.started_at).getTime()) / 1000
+      : null;
+  const fullScrapeAvgSecondsPerCube =
+    fullScrapeElapsedSeconds !== null && fullScrapeStatus && fullScrapeStatus.cubes_found > 0
+      ? fullScrapeElapsedSeconds / fullScrapeStatus.cubes_found
+      : null;
 
   const fetchStatus = () => {
     apiGet<CubeDiscoverySyncStatusRead>("/cube-discover/cubes/status")
@@ -191,7 +260,11 @@ export default function DiscoverCubes() {
               <span className={syncBadgeClass}>{t(`discoverCubesPage.status.${status.status}`)}</span>
             </div>
             <div className="cf-stat">
-              <div className="cf-stat-value">{status.cube_count}</div>
+              {/* The live cube count, not status.cube_count - that field only
+                  ever reflects the regular (bounded, popularity-sorted) sync
+                  above, so it'd go stale the moment a full scrape (below)
+                  adds cubes of its own. */}
+              <div className="cf-stat-value">{cubes?.length ?? status.cube_count}</div>
               <div className="cf-stat-label">{t("discoverCubesPage.cachedCubes")}</div>
             </div>
             {failedCubes.length > 0 && (
@@ -227,6 +300,63 @@ export default function DiscoverCubes() {
                 : t("discoverCubesPage.retryAllFailed", { count: failedCubes.length })}
             </button>
           )}
+        </div>
+      </div>
+
+      <div className="cf-card">
+        <h3 style={{ marginTop: 0 }}>{t("discoverCubesPage.fullScrape.title")}</h3>
+        <p style={{ color: "var(--cf-muted)" }}>{t("discoverCubesPage.fullScrape.description")}</p>
+        {fullScrapeError && <div className="cf-alert cf-alert-error">{fullScrapeError}</div>}
+        {fullScrapeStatus?.status === "FAILED" && fullScrapeStatus.error_message && (
+          <div className="cf-alert cf-alert-error">{fullScrapeStatus.error_message}</div>
+        )}
+        {fullScrapeStatus && (
+          <div className="cf-stat-row">
+            <div className="cf-stat">
+              <span
+                className={
+                  fullScrapeStatus.status === "COMPLETED"
+                    ? "cf-badge cf-badge-ok"
+                    : fullScrapeStatus.status === "FAILED"
+                      ? "cf-badge cf-badge-error"
+                      : fullScrapeStatus.status === "RUNNING"
+                        ? "cf-badge cf-badge-warn"
+                        : "cf-badge"
+                }
+              >
+                {t(`discoverCubesPage.fullScrape.status.${fullScrapeStatus.status}`)}
+              </span>
+            </div>
+            <div className="cf-stat">
+              <div className="cf-stat-value">{fullScrapeStatus.cubes_found.toLocaleString()}</div>
+              <div className="cf-stat-label">{t("discoverCubesPage.fullScrape.cubesFound")}</div>
+            </div>
+            <div className="cf-stat">
+              <div className="cf-stat-value">{fullScrapeStatus.pages_fetched.toLocaleString()}</div>
+              <div className="cf-stat-label">{t("discoverCubesPage.fullScrape.pagesFetched")}</div>
+            </div>
+            {fullScrapeStatus.status === "RUNNING" && fullScrapeElapsedSeconds !== null && (
+              <div className="cf-stat">
+                <div className="cf-stat-value">{formatDuration(fullScrapeElapsedSeconds)}</div>
+                <div className="cf-stat-label">
+                  {fullScrapeAvgSecondsPerCube !== null
+                    ? t("discoverCubesPage.fullScrape.avgPerCube", { seconds: fullScrapeAvgSecondsPerCube.toFixed(1) })
+                    : t("discoverCubesPage.fullScrape.elapsedLabel")}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        <div className="cf-btn-row">
+          <button
+            className="cf-btn cf-btn-primary"
+            disabled={fullScrapeStarting || fullScrapeStatus?.status === "RUNNING"}
+            onClick={handleStartFullScrape}
+          >
+            {fullScrapeStatus?.status === "RUNNING"
+              ? t("discoverCubesPage.fullScrape.status.RUNNING")
+              : t("discoverCubesPage.fullScrape.start")}
+          </button>
         </div>
       </div>
 

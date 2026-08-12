@@ -122,7 +122,7 @@
     "types": { "deck": "Deck", "cube": "Cube" },
     "create": "Create",
     "empty": "No decks or cubes yet.",
-    "columns": { "name": "Name", "type": "Type", "created": "Created", "coverage": "Coverage" },
+    "columns": { "name": "Name", "type": "Type", "created": "Created", "coverage": "Coverage", "costToComplete": "Cost to complete" },
     "filterType": "Show",
     "filterAll": "Decks & cubes",
     "bulkDelete_one": "Delete {{count}} selected",
@@ -176,6 +176,9 @@
     "refreshNow": "Refresh now",
     "refreshing": "Refreshing…",
     "authRequiredHint": "This deck now requires login to view — CardForge only reads public URLs. Refresh manually once it's public again, or re-import it another way.",
+    "copyMissing": "Copy missing to clipboard",
+    "copyMissingDone": "Copied!",
+    "copyMissingError": "Copy failed",
     "refreshStatus": {
       "FETCHING": "Refreshing…",
       "CURRENT": "Up to date",
@@ -198,7 +201,10 @@
       "remainingBudget": "Remaining",
       "unpriced": "Unpriced cards",
       "affordable": "Affordable / missing",
-      "lineTotal": "Line total"
+      "lineTotal": "Line total",
+      "costToComplete": "Cost to complete",
+      "unpricedHint_one": "{{count}} missing card has no price data and isn't included in this total.",
+      "unpricedHint_other": "{{count}} missing cards have no price data and aren't included in this total."
     }
   },
   "sourcesPage": {
@@ -332,7 +338,24 @@
     "retry": "Retry",
     "retryAllFailed": "Retry all failed ({{count}})",
     "retryingAll": "Retrying {{done}} / {{total}}… {{eta}}",
-    "etaSeconds": "(~{{seconds}}s left)"
+    "etaSeconds": "(~{{seconds}}s left)",
+    "fullScrape": {
+      "title": "Full cube import",
+      "description": "The regular sync above only reaches cubes near the top of CubeCobra's own popularity ranking (however many pages deep it goes) — an obscure, unliked cube can never be reached that way, no matter how deep. This instead walks CubeCobra's real catalog to genuine exhaustion, pulling in everything it can. There's no reliable way to know the real total in advance, so no ETA is shown — just what's been found so far and how fast it's going.",
+      "start": "Start full scrape",
+      "status": {
+        "INACTIVE": "Not run yet",
+        "RUNNING": "Running…",
+        "COMPLETED": "Completed",
+        "FAILED": "Failed"
+      },
+      "cubesFound": "Cubes found so far",
+      "pagesFetched": "Pages fetched",
+      "avgPerCube": "~{{seconds}}s / cube",
+      "elapsedLabel": "Elapsed",
+      "lastProgress": "Last progress: {{time}}",
+      "alreadyRunning": "A full scrape is already running."
+    }
   },
   "pricesPage": {
     "mtgjson": {

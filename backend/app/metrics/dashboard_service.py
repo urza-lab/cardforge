@@ -109,6 +109,14 @@ class DashboardSummary:
     mtgjson_price_count: int
     list_buildability: list[ListBuildability] = field(default_factory=list)
     top_leverage: list[PricedLeverageCandidate] = field(default_factory=list)
+    # Real cost-to-complete per list (user-requested "indicative first
+    # guess" price column on the Decks & Cubes overview page) - the exact
+    # same batched compute_list_missing_cost() the Prometheus exporter
+    # already uses, just reused here so it rides the dashboard's own 60s
+    # cache (app.metrics.dashboard_cache) instead of a fresh per-request
+    # computation - "loads fast" was the explicit ask, and this is already
+    # the fast path (near-instant once the cache is warm), not a new one.
+    list_missing_cost: list[ListMissingCost] = field(default_factory=list)
     # Populated by app.metrics.dashboard_cache, not by get_dashboard_summary
     # itself (which always computes a genuinely fresh, real result) - see
     # that module for why a real ~14s computation at real data scale gets
@@ -273,6 +281,7 @@ def get_dashboard_summary(db: Session, user_id: int = DEFAULT_USER_ID) -> Dashbo
         c for c in compute_leverage(owned, lists_required, settings) if c.name.strip().lower() not in _BASIC_LAND_NAMES
     ]
     top_leverage = price_leverage_candidates(db, leverage_candidates[:TOP_LEVERAGE_COUNT], user_id=user_id)
+    list_missing_cost = compute_list_missing_cost(db, list_buildability, user_id=user_id)
 
     scryfall_state = db.get(ScryfallSyncState, SYNC_STATE_ID)
     mtgjson_state = db.get(PriceSyncState, PriceProvider.mtgjson.value)
@@ -291,4 +300,5 @@ def get_dashboard_summary(db: Session, user_id: int = DEFAULT_USER_ID) -> Dashbo
         mtgjson_price_count=mtgjson_state.price_count if mtgjson_state else 0,
         list_buildability=list_buildability,
         top_leverage=top_leverage,
+        list_missing_cost=list_missing_cost,
     )

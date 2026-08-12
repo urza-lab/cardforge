@@ -8,6 +8,18 @@ export interface CubeDiscoverySyncStatusRead {
   error_message: string | null;
 }
 
+export type CubeFullScrapeStatus = "INACTIVE" | "RUNNING" | "COMPLETED" | "FAILED";
+
+export interface CubeFullScrapeStatusRead {
+  status: CubeFullScrapeStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  last_progress_at: string | null;
+  cubes_found: number;
+  pages_fetched: number;
+  error_message: string | null;
+}
+
 export interface PopularCube {
   id: number;
   name: string;

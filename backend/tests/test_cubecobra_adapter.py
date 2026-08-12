@@ -160,3 +160,53 @@ def test_fetch_popular_cubes_raises_on_non_200(monkeypatch: pytest.MonkeyPatch):
     )
     with pytest.raises(SourceFetchError):
         cubecobra.fetch_popular_cubes("test-agent", pages=3)
+
+
+def test_iter_all_cubes_walks_past_any_fixed_page_count(monkeypatch: pytest.MonkeyPatch):
+    """The real point of this generator over fetch_popular_cubes: it must
+    keep walking lastKey until CubeCobra itself says there's nothing left,
+    not stop at any particular page count - see CLAUDE.md for the real
+    0-like cube this was built to eventually reach.
+    """
+    monkeypatch.setattr(cubecobra.time, "sleep", lambda *_: None)
+    total_pages = 7
+    calls: list[dict[str, object]] = []
+
+    def fake_post(url: str, json: dict[str, object], headers: dict[str, str], timeout: float) -> httpx.Response:
+        calls.append(dict(json))
+        page_num = len(calls)
+        cube = {"id": f"cube-{page_num}", "shortId": f"slug-{page_num}", "name": f"Cube {page_num}"}
+        last_key = {"PK": f"page-{page_num}"} if page_num < total_pages else None
+        return _search_response([cube], last_key=last_key)
+
+    monkeypatch.setattr(cubecobra.httpx, "post", fake_post)
+
+    pages = list(cubecobra.iter_all_cubes("test-agent"))
+
+    assert len(calls) == total_pages
+    assert len(pages) == total_pages
+    assert [p[0].external_id for p in pages] == [f"cube-{i}" for i in range(1, total_pages + 1)]
+
+
+def test_iter_all_cubes_yields_incrementally_as_pages_are_fetched(monkeypatch: pytest.MonkeyPatch):
+    """A caller must be able to consume/persist each page as it arrives,
+    not only after the whole (potentially very long, real-world-unbounded)
+    walk finishes - proven here by consuming only the first item from the
+    generator and confirming the second page was never even requested.
+    """
+    monkeypatch.setattr(cubecobra.time, "sleep", lambda *_: None)
+    calls: list[dict[str, object]] = []
+
+    def fake_post(url: str, json: dict[str, object], headers: dict[str, str], timeout: float) -> httpx.Response:
+        calls.append(dict(json))
+        page_num = len(calls)
+        cube = {"id": f"cube-{page_num}", "shortId": f"slug-{page_num}", "name": f"Cube {page_num}"}
+        return _search_response([cube], last_key={"PK": f"page-{page_num}"})
+
+    monkeypatch.setattr(cubecobra.httpx, "post", fake_post)
+
+    gen = cubecobra.iter_all_cubes("test-agent")
+    first_page = next(gen)
+
+    assert len(calls) == 1
+    assert first_page[0].external_id == "cube-1"

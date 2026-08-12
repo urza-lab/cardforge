@@ -612,6 +612,159 @@ resync runs (the ~1.7h Moxfield-commander first-time cost above), which
 is why this was verified via live sampling rather than by asserting on
 the current cache's contents.
 
+**CubeCobra full-catalog scrape, user-requested after finding a real cube
+their own popularity-sorted browse could never reach.** The trigger was a
+real, concrete report, not a hypothetical: a specific real CubeCobra cube
+("Tribal Warfare") the user linked wasn't in the cache. Live investigation
+(fetching that exact page and reading its embedded `window.reactProps`
+JSON, the same client-side-hydration-data technique this project already
+used to find CubeCobra's real search endpoint) found the real cause:
+`likeCount: 0`, `numDecks: 0` - the existing sync's `order: "pop"`
+popularity walk structurally can never reach an obscure/unliked cube no
+matter how many pages deep it goes, since there's an unknown, potentially
+huge long tail of similarly 0-like cubes ahead of it in any popularity
+ranking. Not a bug in the existing sync - a real, inherent limitation of
+"browse by popularity" as a discovery strategy.
+
+The user's own follow-up idea (scrape once via smart pacing, then keep
+current via RSS) was investigated live rather than assumed either way: my
+first pass (checking generic `/rss`, `/feed` paths on all three sites) found
+nothing and was reported as "no RSS exists" - the user then corrected this
+with a real, working per-cube URL (`https://cubecobra.com/cube/rss/{id}`),
+confirmed live to be a genuine RSS feed (a per-cube change-log/blog of card
+adds/removals). This *doesn't* solve discovery, though (it requires already
+knowing a cube's id - can't be used to find cubes CardForge doesn't know
+about yet), so the RSS half of the original idea doesn't apply to the "find
+everything" problem, only to a hypothetical future "cheaply detect if an
+already-known cube changed" feature, not built here. Two Lucky Paper
+"resource map" pages the user separately shared as possible discovery
+sources were checked live too and found to load their real data
+client-side (nothing usable in the raw HTML) - not pursued further absent
+a reason to reverse-engineer their API.
+
+Built as a genuinely separate operation from the regular bounded sync, not
+a bigger page count on the same one: `app.source_adapters.cubecobra.
+iter_all_cubes` is a generator that walks CubeCobra's real search API to
+true exhaustion (its DynamoDB `lastKey` cursor actually running out, not a
+fixed page ceiling), yielding one page at a time so
+`cube_discover_service.run_full_cube_scrape` can upsert
+(`INSERT ... ON CONFLICT (external_id) DO UPDATE`, never delete-then-
+reinsert) and commit progress after every single page - a worker
+restart/crash partway through (a real, routine occurrence during this
+project's own dev sessions - see gotchas #16/#18/#29) loses at most the
+one in-flight page, never anything already found, and can never produce a
+duplicate row regardless of how many times a cube is re-encountered across
+pages or across separate scrape runs. Tracked in a new, dedicated
+single-row table (`CubeFullScrapeState` - INACTIVE/RUNNING/COMPLETED/
+FAILED) kept deliberately separate from the regular sync's own status
+row, since these are two independently-triggerable operations. No
+total-count or ETA field exists anywhere in this design, by explicit user
+instruction ("wenn du gar nicht verlässlich schätzen kannst, gib keine
+info an wie lange es noch dauert") - CubeCobra exposes no count endpoint,
+so there is no honest way to know the real total in advance; only
+`cubes_found`/`pages_fetched` (what's actually been seen) and timestamps
+(from which the frontend derives a real, live elapsed time and average
+seconds/cube) are ever shown. `trigger_full_scrape`'s RQ `job_timeout` is
+set to 7 days - not a real estimate (none is possible), purely a safety
+net against a truly stuck job, matching the same "no fabricated number"
+principle as the missing ETA. A new "Full cube import" section was added
+to the Discover Cubes page (user-requested, its own dedicated UI rather
+than folding into the existing sync button) with live polling while
+running, and the existing "Cached cubes" stat was fixed to read the live
+`cubes.length` instead of the regular sync's own counter, which would
+otherwise silently go stale the moment a full scrape adds cubes of its
+own. 33 new backend tests (adapter-level generator pagination/incremental-
+yield tests, service-level upsert/no-duplicates/progress-preserved-on-
+crash/import-state-preserved tests, API-level trigger/conflict tests); 394
+backend tests total; `ruff`, `mypy`, and the frontend `lint`/`build` are
+all clean. A real full scrape was triggered live against the actual
+CubeCobra catalog (not just a bounded/mocked test) to verify the whole
+pipeline end-to-end under real conditions - see whichever entry follows
+this one for the real, observed outcome once it completes (duration
+proved genuinely unknowable in advance, exactly as designed for).
+
+**Discover Decks: commander search, real attribute filters, price
+indicator, and a copy-to-clipboard button - a four-part user-requested
+batch answered by researching each part live rather than assuming.** (See
+the "Discover Decks search + real attribute filters" entry above for the
+full commander-search/filters build.) Two smaller, related fixes landed in
+the same stretch: (1) `ListDetail.tsx`'s pricing was previously fully
+opt-in (pick a profile, click "Apply") - now the default price profile's
+comparison is fetched automatically once known, so a real "Cost to
+complete" stat appears without any manual step, while the existing
+manual profile-switch/budget flow still works unchanged. (2) A "copy
+missing to clipboard" button was added to the same page, user-requested
+and explicitly prioritized for immediate implementation. Real bug found
+and fixed live, not synthetically: `navigator.clipboard` is only present
+in a secure context (HTTPS or `localhost`), and this app is normally
+reached over plain HTTP on a LAN hostname (`docker.trusted.local:666`) -
+the first version silently failed there ("Copy failed" on every real
+click, confirmed by the user). Fixed by checking `window.isSecureContext`
+and using a synchronous `document.execCommand("copy")` fallback in that
+case - synchronous specifically, not behind an `await`, since some
+browsers only honor `execCommand` as a trusted user gesture when it runs
+directly in the original click handler's call stack, not after a promise
+already rejected. Verified live by the user after the fix.
+
+Separately, a real worker-container recreate (needed mid-session to get
+dev tooling for the CubeCobra work below) interrupted the in-progress
+Discover Decks commander-resolution sync - confirmed live via RQ's
+`StartedJobRegistry` showing an orphaned job whose worker no longer
+existed. Real progress wasn't lost: `MoxfieldCommanderCache` had already
+permanently saved 1,000 resolved commanders before the interruption (the
+whole reason that table is incremental/permanent rather than all-or-
+nothing - see its own entry above), so the resync retriggered afterward
+only had to resolve the remainder, not start over. Treat "did switching
+compose overlays mid-session just kill a real in-progress background job"
+as something to check (via `pg_stat_activity`-style state, or here RQ's
+own job registries) after any container recreate during active
+development, not just after `worker` restarts specifically - a plain
+`up -d --build <service>` that only names one service can still recreate
+others compose decides need reconciling against the currently-active
+compose file set (confirmed live twice in the same session: once via an
+explicit `backend worker` rebuild, once via a `frontend`-only rebuild that
+still silently recreated `backend` too since only `docker-compose.yml`
+was given, reverting it out of the dev overlay).
+
+**"Cost to complete" column on the Decks & Cubes overview, user-requested as
+a fast, indicative first guess.** No new pricing logic needed - `app.
+metrics.dashboard_service.compute_list_missing_cost` (the same batched,
+chunked computation the Prometheus exporter already used, see gotchas
+#27/#33) was simply also included in the cached `DashboardSummary` (app.
+metrics.dashboard_cache) and exposed as a new `list_missing_cost` field,
+so `Lists.tsx` gets it "for free" the exact same way it already gets
+coverage % - one already-cached, already-fast `GET /api/dashboard` call,
+not a new per-list computation. A list with any unpriced missing card is
+simply absent from this list (same "no fake success" reasoning as the
+exporter's own version) rather than shown with a misleadingly-partial
+total. 2 new backend tests; 396 backend tests total; `ruff`, `mypy`, and
+the frontend `lint`/`build` are all clean.
+
+A real, live self-inflicted incident happened while deploying this batch,
+worth recording as its own gotcha-style lesson: running `docker compose
+-f docker-compose.yml -f docker-compose.dev.yml up -d --build frontend`
+silently swapped the *frontend* container from its normal nginx/static
+build into `docker-compose.dev.yml`'s Vite-dev-server override (port 5173,
+no nginx, nothing listening on the port :666 traffic actually targets) -
+`docker-compose.dev.yml`'s frontend service is a hot-reload dev tool, not
+just "the same thing plus a bind mount," unlike its backend/worker
+overrides. This made the real public URL (`:666`) return nothing for
+about a minute, confirmed live via the user directly asking whether it was
+a disk-space problem (it wasn't - host disk was 25% used throughout).
+Fixed by re-running with only `docker-compose.yml` for the frontend
+service specifically. Two background jobs (the Discover Decks commander
+sync, the CubeCobra full scrape, both described above) were running on
+`worker` at the exact same time and were *not* affected by any of this,
+confirmed via `worker`'s own unchanged container start timestamp
+throughout - only services actually named in an `up` invocation get
+reconciled against the given compose file set, everything else keeps
+running as it already was. Lesson: `docker-compose.dev.yml`'s frontend
+override is qualitatively different from its backend/worker overrides
+(replaces the whole service, not just adds a mount) - never combine it
+into a command targeting frontend unless a Vite dev server is actually
+wanted; use the base `docker-compose.yml` alone for any real frontend
+rebuild, dev session or not.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key

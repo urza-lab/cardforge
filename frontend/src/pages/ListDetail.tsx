@@ -10,6 +10,33 @@ import type { PriceProfile } from "../types/pricing";
 
 const REFRESH_POLL_INTERVAL_MS = 3000;
 
+// document.execCommand("copy") is deprecated but still works in insecure
+// (plain HTTP) contexts where navigator.clipboard is unavailable - see
+// handleCopyMissingToClipboard. Must run synchronously within the original
+// click handler's call stack (not after an `await`) - some browsers only
+// honor it as a trusted user gesture that way, which is why the caller
+// never awaits anything before reaching this on the fallback path. Throws
+// if the browser refuses it too, which the caller catches.
+function copyViaFallback(text: string): void {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "0";
+  textarea.style.opacity = "0";
+  textarea.readOnly = true;
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, text.length);
+  try {
+    const ok = document.execCommand("copy");
+    if (!ok) throw new Error("execCommand('copy') returned false");
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
 export default function ListDetail() {
   const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
@@ -29,6 +56,8 @@ export default function ListDetail() {
   const [budgetInput, setBudgetInput] = useState<string>("");
   const [pricingBusy, setPricingBusy] = useState(false);
   const [pricingError, setPricingError] = useState<string | null>(null);
+
+  const [copyMissingState, setCopyMissingState] = useState<"idle" | "copied" | "error">("idle");
 
   const fetchAll = useCallback(
     (comparisonMode: ComparisonMode) => {
@@ -73,6 +102,22 @@ export default function ListDetail() {
       setPricingBusy(false);
     }
   }
+
+  // User-requested: a price indicator should be visible on this page without
+  // an extra manual step. Pricing was previously opt-in (pick a profile,
+  // click "Apply") because it costs extra DB round-trips - see
+  // ListComparisonResponse's own docstring - but that cost is the same
+  // whether triggered by a click or automatically, so this just does the
+  // first `handleApplyPricing()`-equivalent call automatically once the
+  // default profile is known, using whatever `comparison` a plain mode-
+  // change fetch (fetchAll) already loaded. Re-fires after any fresh,
+  // unpriced `comparison` (e.g. a mode switch), not just on first load.
+  useEffect(() => {
+    if (priceProfileId && comparison && comparison.priced_missing === null && !pricingBusy) {
+      handleApplyPricing();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceProfileId, comparison, pricingBusy]);
 
   useEffect(() => {
     apiGet<UserSettings>("/settings")
@@ -123,6 +168,50 @@ export default function ListDetail() {
     }
   }
 
+  function flashCopyMissingState(state: "copied" | "error") {
+    setCopyMissingState(state);
+    setTimeout(() => setCopyMissingState("idle"), 2000);
+  }
+
+  function handleCopyMissingToClipboard() {
+    if (!comparison || comparison.missing.length === 0) return;
+    // "{quantity} {name}" per line, one card per line - matches
+    // app.parsers.list_text's own accepted format (`^\d+x?\s+.+$`), so this
+    // is also directly re-pasteable into CardForge's own manual text import
+    // or another deckbuilder's decklist paste box, not just a display copy.
+    const text = comparison.missing.map((m) => `${m.missing_quantity} ${m.name}`).join("\n");
+
+    // navigator.clipboard is only available (and functional) in a secure
+    // context (HTTPS or localhost) - this app is commonly reached over
+    // plain HTTP on a LAN hostname (docker.trusted.local:666), where it's
+    // simply absent. Go straight to the synchronous execCommand fallback
+    // in that case rather than attempting (and always failing) the modern
+    // API first.
+    if (window.isSecureContext && navigator.clipboard) {
+      navigator.clipboard.writeText(text).then(
+        () => flashCopyMissingState("copied"),
+        (err: unknown) => {
+          try {
+            copyViaFallback(text);
+            flashCopyMissingState("copied");
+          } catch (fallbackErr) {
+            console.error("copy to clipboard failed", err, fallbackErr);
+            flashCopyMissingState("error");
+          }
+        },
+      );
+      return;
+    }
+
+    try {
+      copyViaFallback(text);
+      flashCopyMissingState("copied");
+    } catch (err) {
+      console.error("copy to clipboard failed", err);
+      flashCopyMissingState("error");
+    }
+  }
+
   async function handleDelete() {
     if (!id || !cardList) return;
     setDeleting(true);
@@ -134,6 +223,17 @@ export default function ListDetail() {
       setDeleting(false);
     }
   }
+
+  const totalMissingCost = comparison?.priced_missing
+    ? comparison.priced_missing.reduce(
+        (sum, p) => (p.unit_price !== null ? sum + Number(p.unit_price) * p.missing_quantity : sum),
+        0,
+      )
+    : null;
+  const unpricedMissingCount = comparison?.priced_missing
+    ? comparison.priced_missing.filter((p) => p.unit_price === null).length
+    : 0;
+  const selectedProfileCurrency = priceProfiles?.find((p) => String(p.id) === priceProfileId)?.currency;
 
   const { sorted, sortKey, direction, toggleSort } = useSort<CardListItem>(items ?? [], "section", "asc");
 
@@ -284,7 +384,36 @@ export default function ListDetail() {
               <div className="cf-stat-value">{comparison.missing.length}</div>
               <div className="cf-stat-label">{t("comparisonsPage.missingCards")}</div>
             </div>
+            {totalMissingCost !== null && (
+              <div className="cf-stat">
+                <div className="cf-stat-value">
+                  {totalMissingCost.toFixed(2)} {selectedProfileCurrency}
+                  {unpricedMissingCount > 0 && (
+                    <span
+                      style={{ fontSize: 13, color: "var(--cf-muted)", fontWeight: "normal" }}
+                      title={t("listDetailPage.pricing.unpricedHint", { count: unpricedMissingCount })}
+                    >
+                      {" "}
+                      (+{unpricedMissingCount})
+                    </span>
+                  )}
+                </div>
+                <div className="cf-stat-label">{t("listDetailPage.pricing.costToComplete")}</div>
+              </div>
+            )}
           </div>
+
+          {comparison.missing.length > 0 && (
+            <div className="cf-btn-row">
+              <button className="cf-btn" onClick={handleCopyMissingToClipboard}>
+                {copyMissingState === "copied"
+                  ? t("listDetailPage.copyMissingDone")
+                  : copyMissingState === "error"
+                    ? t("listDetailPage.copyMissingError")
+                    : t("listDetailPage.copyMissing")}
+              </button>
+            </div>
+          )}
 
           {comparison.missing.length > 0 && (
             <div className="cf-table-wrap">

@@ -30,6 +30,16 @@ class LeverageCandidateRead(BaseModel):
     currency: str | None
 
 
+class ListMissingCostRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    list_id: int
+    name: str
+    list_type: str
+    total_cost: Decimal
+    currency: str
+
+
 class DashboardSummaryRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -46,6 +56,7 @@ class DashboardSummaryRead(BaseModel):
     mtgjson_price_count: int
     list_buildability: list[ListBuildabilityRead]
     top_leverage: list[LeverageCandidateRead]
+    list_missing_cost: list[ListMissingCostRead]
     computed_at: datetime | None
     is_refreshing: bool
     refresh_eta_seconds: float | None

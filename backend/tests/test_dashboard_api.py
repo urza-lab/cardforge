@@ -122,6 +122,42 @@ def test_dashboard_leverage_unpriced_candidate_has_null_price():
     assert candidate["currency"] is None
 
 
+def test_dashboard_includes_list_missing_cost():
+    """User-requested "indicative first guess" price column on the Decks &
+    Cubes overview page - reuses the same batched compute_list_missing_cost
+    the Prometheus exporter already used, now also exposed on the (cached)
+    dashboard summary so the frontend gets it for free alongside coverage %.
+    """
+    _seed_sol_ring()
+    list_id = _create_list_with_missing_sol_ring()
+    db = get_sessionmaker()()
+    try:
+        db.add(
+            PriceObservation(
+                scryfall_card_id=SOL_RING_ID, provider=PriceProvider.manual.value, currency="USD", foil=False,
+                price=Decimal("2.50"),
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    resp = client.get("/api/dashboard")
+    body = resp.json()
+    entry = next(c for c in body["list_missing_cost"] if c["list_id"] == list_id)
+    assert entry["total_cost"] == "2.50"
+    assert entry["currency"] == "USD"
+
+
+def test_dashboard_list_missing_cost_omits_unpriced_list():
+    _seed_sol_ring()
+    _create_list_with_missing_sol_ring()  # no price observation seeded - can't be priced
+
+    resp = client.get("/api/dashboard")
+    body = resp.json()
+    assert body["list_missing_cost"] == []
+
+
 def test_dashboard_leverage_excludes_basic_lands():
     """User-requested: basic lands are never a real purchasing decision
     (unlimited real-world supply) and their raw coverage-gain numbers are

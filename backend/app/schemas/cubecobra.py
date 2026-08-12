@@ -15,6 +15,18 @@ class CubeDiscoverySyncStatusRead(BaseModel):
     error_message: str | None
 
 
+class CubeFullScrapeStatusRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    status: str
+    started_at: datetime | None
+    finished_at: datetime | None
+    last_progress_at: datetime | None
+    cubes_found: int
+    pages_fetched: int
+    error_message: str | None
+
+
 class PopularCubeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -18,6 +18,14 @@ export interface LeverageCandidate {
   currency: string | null;
 }
 
+export interface ListMissingCost {
+  list_id: number;
+  name: string;
+  list_type: "deck" | "cube";
+  total_cost: string;
+  currency: string;
+}
+
 export interface DashboardSummary {
   collection_distinct_items: number;
   collection_total_quantity: number;
@@ -32,6 +40,7 @@ export interface DashboardSummary {
   mtgjson_price_count: number;
   list_buildability: ListBuildability[];
   top_leverage: LeverageCandidate[];
+  list_missing_cost: ListMissingCost[];
   computed_at: string | null;
   is_refreshing: boolean;
   refresh_eta_seconds: number | null;

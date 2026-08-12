@@ -122,7 +122,7 @@
     "types": { "deck": "Deck", "cube": "Cube" },
     "create": "Erstellen",
     "empty": "Noch keine Decks oder Cubes.",
-    "columns": { "name": "Name", "type": "Typ", "created": "Erstellt", "coverage": "Abdeckung" },
+    "columns": { "name": "Name", "type": "Typ", "created": "Erstellt", "coverage": "Abdeckung", "costToComplete": "Kosten zum Komplettieren" },
     "filterType": "Anzeigen",
     "filterAll": "Decks & Cubes",
     "bulkDelete_one": "{{count}} ausgewählte löschen",
@@ -176,6 +176,9 @@
     "refreshNow": "Jetzt aktualisieren",
     "refreshing": "Aktualisiert…",
     "authRequiredHint": "Dieses Deck erfordert jetzt einen Login zum Anzeigen — CardForge liest nur öffentliche URLs. Aktualisiere manuell, sobald es wieder öffentlich ist, oder importiere es anders neu.",
+    "copyMissing": "Fehlende in Zwischenablage kopieren",
+    "copyMissingDone": "Kopiert!",
+    "copyMissingError": "Kopieren fehlgeschlagen",
     "refreshStatus": {
       "FETCHING": "Aktualisiert…",
       "CURRENT": "Aktuell",
@@ -198,7 +201,10 @@
       "remainingBudget": "Verbleibend",
       "unpriced": "Karten ohne Preis",
       "affordable": "Leistbar / fehlend",
-      "lineTotal": "Zeilensumme"
+      "lineTotal": "Zeilensumme",
+      "costToComplete": "Kosten zum Komplettieren",
+      "unpricedHint_one": "{{count}} fehlende Karte hat keine Preisdaten und ist in dieser Summe nicht enthalten.",
+      "unpricedHint_other": "{{count}} fehlende Karten haben keine Preisdaten und sind in dieser Summe nicht enthalten."
     }
   },
   "sourcesPage": {
@@ -332,7 +338,24 @@
     "retry": "Erneut versuchen",
     "retryAllFailed": "Alle fehlgeschlagenen erneut versuchen ({{count}})",
     "retryingAll": "Versuche erneut {{done}} / {{total}}… {{eta}}",
-    "etaSeconds": "(noch ~{{seconds}}s)"
+    "etaSeconds": "(noch ~{{seconds}}s)",
+    "fullScrape": {
+      "title": "Vollständiger Cube-Import",
+      "description": "Der normale Sync oben erreicht nur Cubes nahe der Spitze von CubeCobras eigener Popularitätsrangliste (egal wie viele Seiten tief) — ein obskurer, ungelikter Cube wird so nie erreicht, egal wie tief. Dies durchläuft stattdessen CubeCobras echten Katalog bis zum wirklichen Ende und holt alles, was möglich ist. Es gibt keine verlässliche Möglichkeit, die echte Gesamtzahl im Voraus zu kennen, daher keine ETA — nur was bisher gefunden wurde und wie schnell es geht.",
+      "start": "Vollständigen Scrape starten",
+      "status": {
+        "INACTIVE": "Noch nicht ausgeführt",
+        "RUNNING": "Läuft…",
+        "COMPLETED": "Abgeschlossen",
+        "FAILED": "Fehlgeschlagen"
+      },
+      "cubesFound": "Bisher gefundene Cubes",
+      "pagesFetched": "Abgerufene Seiten",
+      "avgPerCube": "~{{seconds}}s / Cube",
+      "elapsedLabel": "Verstrichen",
+      "lastProgress": "Letzter Fortschritt: {{time}}",
+      "alreadyRunning": "Ein vollständiger Scrape läuft bereits."
+    }
   },
   "pricesPage": {
     "mtgjson": {
