@@ -489,6 +489,58 @@ against that real, now-larger dataset (down from an unbounded hang), zero
 remaining `imported_list_id` collisions. 357 backend tests pass; `ruff`,
 `mypy`, and the frontend `lint`/`build` are all clean.
 
+**Dashboard row-count dropdowns, reorder, and a background-refreshed cache
+with a visible disclaimer, user-requested after the price-leverage
+filters above.** Three-part ask: (1) move the Grafana embed above the
+"what to buy next" leverage table (it had drifted below again after the
+scatter-plot work); (2) a 25/50/100/200/all row-count dropdown on both big
+Dashboard tables (`frontend/src/hooks/useRowLimit.ts`, a small
+`useRowLimit`/`useLimited` pair mirroring the existing `useSort` hook
+shape); (3) make the page "more performant" - investigated live rather
+than assumed, and the real number was a genuine ~14s server-side
+computation at the collection's real current scale (1,445 lists), not a
+frontend rendering problem the row-limit dropdown would fix on its own.
+Presented the two honest options (always-live vs. a short TTL cache) via
+AskUserQuestion; the user chose the cache but explicitly required a
+visible "refreshing to newest data, ETA X" disclaimer rather than silently
+serving stale numbers - "no fake success" applies to staleness, not just
+wrong values. Built as `app/metrics/dashboard_cache.py`: a plain
+`threading.Lock`-guarded module-level cache (60s TTL), refreshed by a
+one-off `threading.Thread` triggered by the first stale request rather
+than a fixed timer (so it never recomputes while nobody's looking at the
+page, unlike the periodic Scryfall/MTGJSON sync loop) - the very first
+call on a fresh backend process has nothing to fall back to and blocks for
+the one real ~14s computation; every request after that is served from
+cache, with `is_refreshing`/`refresh_eta_seconds` (derived from the
+*previous* run's real duration) exposed through the API so the frontend
+can show the disclaimer instead of a spinner or silent staleness.
+`app/api/dashboard.py` was rewritten to call the cache instead of the
+service function directly, dropping its `db` dependency entirely (the
+cache's background thread opens its own session, since a request-scoped
+one would already be closed by the time that thread runs). The frontend
+disclaimer anchors the server's ETA plus the moment it was received and
+ticks a local display value down every second, re-synced by the existing
+2s poll-while-refreshing loop, instead of only jumping every 2 seconds -
+added after the user watched the first version and asked for a real
+countdown rather than a static number. A real test-isolation bug was
+caught immediately on first test run, not assumed away: `dashboard_cache`
+is module-level, in-process state, so without clearing it in
+`tests/conftest.py`'s autouse `_clean_db` fixture, one test's cached
+result leaked into every later test's assertions against a since-reset
+database (5 of 6 `test_dashboard_api.py` tests failed until fixed).
+**Complete and verified end-to-end against real data**: a cold real
+request against the real 1,445-list collection took 13.9s and populated
+the cache; an immediate second real request returned in 59ms from cache;
+after the real 60s TTL genuinely elapsed, a real request returned in
+177ms with the *previous* `computed_at`, `is_refreshing: true`, and a real
+ETA (~13.8s, matching the prior run's real duration) instead of blocking;
+polling afterward showed the cache flip back to `is_refreshing: false`
+with a fresh `computed_at` once the real background refresh completed.
+365 backend tests pass (11 new, covering first-call-blocks,
+warm-cache-reuse, stale-serves-old-data-with-refreshing-flag,
+concurrent-stale-requests-trigger-only-one-refresh, and `clear()`);
+`ruff`, `mypy`, and the frontend `lint`/`build` are all clean.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key

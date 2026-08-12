@@ -32,4 +32,7 @@ export interface DashboardSummary {
   mtgjson_price_count: number;
   list_buildability: ListBuildability[];
   top_leverage: LeverageCandidate[];
+  computed_at: string | null;
+  is_refreshing: boolean;
+  refresh_eta_seconds: number | null;
 }

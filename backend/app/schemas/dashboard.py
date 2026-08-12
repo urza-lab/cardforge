@@ -46,3 +46,6 @@ class DashboardSummaryRead(BaseModel):
     mtgjson_price_count: int
     list_buildability: list[ListBuildabilityRead]
     top_leverage: list[LeverageCandidateRead]
+    computed_at: datetime | None
+    is_refreshing: bool
+    refresh_eta_seconds: float | None

@@ -4,6 +4,7 @@ import pytest
 from app.core.config import get_settings
 from app.core.database import get_sessionmaker
 from app.core.queue import get_redis
+from app.metrics import dashboard_cache
 from sqlalchemy import text
 
 
@@ -50,6 +51,12 @@ def _clean_db():
     user and id=1 sync-state row are left in place.
     """
     yield
+    # app.metrics.dashboard_cache is module-level, in-process state (not
+    # per-request) - without clearing it here, one test's dashboard result
+    # would leak into the next test's assertions against a since-reset
+    # database (confirmed live: every test after the first one in
+    # test_dashboard_api.py failed against stale cached data).
+    dashboard_cache.clear()
     session_local = get_sessionmaker()
     db = session_local()
     try:

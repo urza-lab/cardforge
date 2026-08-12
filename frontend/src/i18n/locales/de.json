@@ -363,6 +363,16 @@
     "buildable": "Baubar",
     "noLists": "Noch keine Decks oder Cubes — siehe Decks & Cubes.",
     "sources": "Quelldaten",
+    "rowLimit": {
+      "label": "Anzeigen",
+      "first": "Erste {{count}}",
+      "all": "Alle"
+    },
+    "cache": {
+      "asOf": "Stand: {{time}}",
+      "refreshing": "Aktualisiere auf neueste Daten…",
+      "refreshingEta": "Aktualisiere auf neueste Daten, fertig in ~{{seconds}}s…"
+    },
     "leverage": {
       "title": "Was als Nächstes kaufen",
       "hint": "Sortiert danach, wie stark der Kauf jeder Karte die Baubarkeit über alle Decks/Cubes hinweg verbessern würde — siehe PRICING.md \"collection leverage\".",

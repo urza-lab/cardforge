@@ -109,6 +109,15 @@ class DashboardSummary:
     mtgjson_price_count: int
     list_buildability: list[ListBuildability] = field(default_factory=list)
     top_leverage: list[PricedLeverageCandidate] = field(default_factory=list)
+    # Populated by app.metrics.dashboard_cache, not by get_dashboard_summary
+    # itself (which always computes a genuinely fresh, real result) - see
+    # that module for why a real ~14s computation at real data scale gets
+    # served from a short-lived cache with an honest "still on the old
+    # data, refreshing, ETA ~Xs" signal instead of either blocking every
+    # request or silently going stale with no indication.
+    computed_at: datetime | None = None
+    is_refreshing: bool = False
+    refresh_eta_seconds: float | None = None
 
 
 def compute_list_buildability(

@@ -363,6 +363,16 @@
     "buildable": "Buildable",
     "noLists": "No decks or cubes yet — see Decks & Cubes.",
     "sources": "Source data",
+    "rowLimit": {
+      "label": "Show",
+      "first": "First {{count}}",
+      "all": "All"
+    },
+    "cache": {
+      "asOf": "Data as of {{time}}",
+      "refreshing": "Refreshing to newest data…",
+      "refreshingEta": "Refreshing to newest data, ready in ~{{seconds}}s…"
+    },
     "leverage": {
       "title": "What to buy next",
       "hint": "Ranked by how much buying each card would improve buildability across every deck/cube — see PRICING.md \"collection leverage\".",

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { apiGet, ApiError } from "../api/client";
+import { ROW_LIMIT_OPTIONS, type RowLimit, useLimited, useRowLimit } from "../hooks/useRowLimit";
 import { useSort } from "../hooks/useSort";
 import type { DashboardSummary, LeverageCandidate, ListBuildability } from "../types/dashboard";
 import type { UserSettings } from "../types/settings";
@@ -62,6 +63,11 @@ export default function Dashboard() {
     return leverageDirection === "asc" ? " ▲" : " ▼";
   }
 
+  const leverageRowLimit = useRowLimit(25);
+  const visibleLeverage = useLimited(sortedLeverage, leverageRowLimit.limit);
+  const buildabilityRowLimit = useRowLimit(25);
+  const visibleBuildability = useLimited(sortedBuildability, buildabilityRowLimit.limit);
+
   useEffect(() => {
     apiGet<DashboardSummary>("/dashboard")
       .then(setSummary)
@@ -70,6 +76,47 @@ export default function Dashboard() {
       .then((s) => setGrafanaEmbedUrl(s.grafana_embed_url))
       .catch(() => undefined); // optional feature - a settings fetch failure shouldn't block the rest of the dashboard
   }, []);
+
+  // The backend serves a short-lived cache (see app.metrics.dashboard_cache)
+  // and reports is_refreshing/refresh_eta_seconds while a background refresh
+  // is in flight. Poll while that's true so the page picks up the fresh
+  // result as soon as it lands, instead of requiring a manual reload.
+  useEffect(() => {
+    if (!summary?.is_refreshing) return;
+    const id = setInterval(() => {
+      apiGet<DashboardSummary>("/dashboard")
+        .then(setSummary)
+        .catch(() => undefined);
+    }, 2000);
+    return () => clearInterval(id);
+  }, [summary?.is_refreshing]);
+
+  // The poll above only re-syncs every 2s, which would make the ETA visibly
+  // jump instead of count down. Anchor the server's ETA + the moment we
+  // received it, then tick a local display value down every second in
+  // between polls for a smooth countdown.
+  const [etaAnchor, setEtaAnchor] = useState<{ eta: number; receivedAt: number } | null>(null);
+  const [displayEta, setDisplayEta] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (summary?.is_refreshing && summary.refresh_eta_seconds !== null) {
+      setEtaAnchor({ eta: summary.refresh_eta_seconds, receivedAt: Date.now() });
+    } else {
+      setEtaAnchor(null);
+      setDisplayEta(null);
+    }
+  }, [summary?.is_refreshing, summary?.refresh_eta_seconds]);
+
+  useEffect(() => {
+    if (!etaAnchor) return;
+    const tick = () => {
+      const elapsed = (Date.now() - etaAnchor.receivedAt) / 1000;
+      setDisplayEta(Math.max(Math.ceil(etaAnchor.eta - elapsed), 0));
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [etaAnchor]);
 
   function syncBadgeClass(status: string) {
     if (status === "CURRENT") return "cf-badge cf-badge-ok";
@@ -99,6 +146,20 @@ export default function Dashboard() {
     <div>
       <h2>{t("nav.dashboard")}</h2>
 
+      {(summary.computed_at || summary.is_refreshing) && (
+        <p style={{ color: "var(--cf-muted)", marginTop: -8 }}>
+          {summary.computed_at && t("dashboardPage.cache.asOf", { time: new Date(summary.computed_at).toLocaleTimeString() })}
+          {summary.is_refreshing && (
+            <>
+              {summary.computed_at ? " · " : ""}
+              {displayEta !== null
+                ? t("dashboardPage.cache.refreshingEta", { seconds: displayEta })
+                : t("dashboardPage.cache.refreshing")}
+            </>
+          )}
+        </p>
+      )}
+
       <div className="cf-card">
         <h3 style={{ marginTop: 0 }}>{t("dashboardPage.collection")}</h3>
         <div className="cf-stat-row">
@@ -115,6 +176,22 @@ export default function Dashboard() {
             <div className="cf-stat-label">{t("dashboardPage.resolvedCount")}</div>
           </div>
         </div>
+      </div>
+
+      <div className="cf-card">
+        <h3 style={{ marginTop: 0 }}>{t("dashboardPage.grafana.title")}</h3>
+        {grafanaEmbedUrl ? (
+          <iframe
+            src={grafanaEmbedUrl}
+            title={t("dashboardPage.grafana.title")}
+            style={{ width: "100%", height: 480, border: "none", borderRadius: 6 }}
+          />
+        ) : (
+          <p style={{ color: "var(--cf-muted)", marginTop: 0 }}>
+            {t("dashboardPage.grafana.notConfigured")}{" "}
+            <Link to="/settings">{t("nav.settings")}</Link>.
+          </p>
+        )}
       </div>
 
       {summary.top_leverage.length > 0 && (
@@ -151,8 +228,24 @@ export default function Dashboard() {
                 placeholder={t("dashboardPage.leverage.filterMaxPriceAny")}
               />
             </div>
+            <div>
+              <label htmlFor="leverage-row-limit">{t("dashboardPage.rowLimit.label")}</label>
+              <select
+                id="leverage-row-limit"
+                className="cf-select"
+                value={leverageRowLimit.limit}
+                onChange={(e) => leverageRowLimit.setLimit((e.target.value === "all" ? "all" : Number(e.target.value)) as RowLimit)}
+              >
+                {ROW_LIMIT_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {t("dashboardPage.rowLimit.first", { count: n })}
+                  </option>
+                ))}
+                <option value="all">{t("dashboardPage.rowLimit.all")}</option>
+              </select>
+            </div>
             <div style={{ color: "var(--cf-muted)", paddingBottom: 8 }}>
-              {t("dashboardPage.leverage.filterCount", { shown: sortedLeverage.length, total: leverageRows.length })}
+              {t("dashboardPage.leverage.filterCount", { shown: visibleLeverage.length, total: leverageRows.length })}
             </div>
           </div>
 
@@ -180,7 +273,7 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {sortedLeverage.map((c) => (
+                {visibleLeverage.map((c) => (
                   <tr key={`${c.name}::${c.oracle_id ?? c.scryfall_card_id ?? ""}`}>
                     <td>{c.name}</td>
                     <td>{c.quantity_needed}</td>
@@ -203,22 +296,6 @@ export default function Dashboard() {
       )}
 
       <div className="cf-card">
-        <h3 style={{ marginTop: 0 }}>{t("dashboardPage.grafana.title")}</h3>
-        {grafanaEmbedUrl ? (
-          <iframe
-            src={grafanaEmbedUrl}
-            title={t("dashboardPage.grafana.title")}
-            style={{ width: "100%", height: 480, border: "none", borderRadius: 6 }}
-          />
-        ) : (
-          <p style={{ color: "var(--cf-muted)", marginTop: 0 }}>
-            {t("dashboardPage.grafana.notConfigured")}{" "}
-            <Link to="/settings">{t("nav.settings")}</Link>.
-          </p>
-        )}
-      </div>
-
-      <div className="cf-card">
         <h3 style={{ marginTop: 0 }}>{t("dashboardPage.lists")}</h3>
         <div className="cf-stat-row">
           <div className="cf-stat">
@@ -236,46 +313,75 @@ export default function Dashboard() {
         </div>
 
         {summary.list_buildability.length > 0 && (
-          <div className="cf-table-wrap" style={{ marginTop: 16 }}>
-            <table className="cf-table">
-              <thead>
-                <tr>
-                  <th className="cf-th-sortable" onClick={() => toggleSort("name")}>
-                    {t("listsPage.columns.name")}
-                    {sortIndicator("name")}
-                  </th>
-                  <th className="cf-th-sortable" onClick={() => toggleSort("list_type")}>
-                    {t("listsPage.columns.type")}
-                    {sortIndicator("list_type")}
-                  </th>
-                  <th className="cf-th-sortable" onClick={() => toggleSort("coverage_percent")}>
-                    {t("comparisonsPage.coverage")}
-                    {sortIndicator("coverage_percent")}
-                  </th>
-                  <th className="cf-th-sortable" onClick={() => toggleSort("is_fully_buildable")}>
-                    {t("dashboardPage.buildable")}
-                    {sortIndicator("is_fully_buildable")}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedBuildability.map((lb) => (
-                  <tr key={lb.list_id}>
-                    <td>
-                      <Link to={`/lists/${lb.list_id}`}>{lb.name}</Link>
-                    </td>
-                    <td>{t(`listsPage.types.${lb.list_type}`)}</td>
-                    <td>{lb.coverage_percent}%</td>
-                    <td>
-                      <span className={lb.is_fully_buildable ? "cf-badge cf-badge-ok" : "cf-badge cf-badge-warn"}>
-                        {lb.is_fully_buildable ? t("common.yes") : t("common.no")}
-                      </span>
-                    </td>
+          <>
+            <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "flex-end", gap: 10, marginTop: 12 }}>
+              <div>
+                <label htmlFor="buildability-row-limit">{t("dashboardPage.rowLimit.label")}</label>
+                <select
+                  id="buildability-row-limit"
+                  className="cf-select"
+                  value={buildabilityRowLimit.limit}
+                  onChange={(e) =>
+                    buildabilityRowLimit.setLimit((e.target.value === "all" ? "all" : Number(e.target.value)) as RowLimit)
+                  }
+                >
+                  {ROW_LIMIT_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {t("dashboardPage.rowLimit.first", { count: n })}
+                    </option>
+                  ))}
+                  <option value="all">{t("dashboardPage.rowLimit.all")}</option>
+                </select>
+              </div>
+              <div style={{ color: "var(--cf-muted)", paddingBottom: 8 }}>
+                {t("dashboardPage.leverage.filterCount", {
+                  shown: visibleBuildability.length,
+                  total: summary.list_buildability.length,
+                })}
+              </div>
+            </div>
+
+            <div className="cf-table-wrap" style={{ marginTop: 8 }}>
+              <table className="cf-table">
+                <thead>
+                  <tr>
+                    <th className="cf-th-sortable" onClick={() => toggleSort("name")}>
+                      {t("listsPage.columns.name")}
+                      {sortIndicator("name")}
+                    </th>
+                    <th className="cf-th-sortable" onClick={() => toggleSort("list_type")}>
+                      {t("listsPage.columns.type")}
+                      {sortIndicator("list_type")}
+                    </th>
+                    <th className="cf-th-sortable" onClick={() => toggleSort("coverage_percent")}>
+                      {t("comparisonsPage.coverage")}
+                      {sortIndicator("coverage_percent")}
+                    </th>
+                    <th className="cf-th-sortable" onClick={() => toggleSort("is_fully_buildable")}>
+                      {t("dashboardPage.buildable")}
+                      {sortIndicator("is_fully_buildable")}
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {visibleBuildability.map((lb) => (
+                    <tr key={lb.list_id}>
+                      <td>
+                        <Link to={`/lists/${lb.list_id}`}>{lb.name}</Link>
+                      </td>
+                      <td>{t(`listsPage.types.${lb.list_type}`)}</td>
+                      <td>{lb.coverage_percent}%</td>
+                      <td>
+                        <span className={lb.is_fully_buildable ? "cf-badge cf-badge-ok" : "cf-badge cf-badge-warn"}>
+                          {lb.is_fully_buildable ? t("common.yes") : t("common.no")}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
         {summary.list_buildability.length === 0 && <p>{t("dashboardPage.noLists")}</p>}
       </div>
