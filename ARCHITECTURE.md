@@ -833,6 +833,34 @@ be decided without blocking implementation. All are changeable later.
   resolvable price at all, and the frontend shows it next to the total
   (e.g. "$4,227.26 (2 unpriced)") instead of a misleadingly complete-
   looking number or nothing.
+- **`app.comparison.leverage`/`engine` were re-architected around a
+  read-only, precomputed owned-pool once real data (590+ lists) exposed a
+  real O(candidates x lists) blowup that "dozens of decks/cubes" never
+  triggered** - see CLAUDE.md gotcha #32 for the full technical shape
+  (`build_owned_pool`/`compare_pool` split, per-list-baseline dict lookups
+  replacing a re-run `compare()` per candidate-list pair). This was a
+  genuine site-down incident (dashboard 504s cascading into unrelated
+  endpoints hanging too, since this project's single uvicorn process has
+  no worker pool), not a preemptive optimization - the fix was driven
+  entirely by live profiling (`cProfile`, manual timing checkpoints) after
+  initial guesses about the bottleneck (first the DB query, then a naive
+  reverse-index) both turned out insufficient once measured.
+- **Server-side import tracking for Discover Cubes (`PopularCube.
+  imported_list_id`/`import_error`/`import_attempted_at`) required
+  switching `run_cube_discovery_sync` from plain delete-then-reinsert to a
+  snapshot-before/restore-after pattern**, same shape as gotcha #19's
+  price-observation preservation - without it, a routine resync would
+  silently reset every cube's "already imported"/"failed" state, defeating
+  the whole point of persisting it server-side instead of in React state.
+- **A same-named `CardList` is not reliable proof it's the same real
+  cube** - CubeCobra has no uniqueness guarantee on cube *names*, only on
+  `external_id`. `import_popular_cube`'s "adopt an existing same-named
+  list" logic only does so when the name is currently unambiguous (exactly
+  one `PopularCube.external_id` has it); an ambiguous name gets its own
+  disambiguated list (`f"{name} ({short_id})"`) instead of ever risking a
+  wrong adoption - see CLAUDE.md gotcha #35 for the two real cross-linked
+  rows this caught live and how they were corrected without deleting any
+  real card data.
 
 ## Backend module boundaries
 

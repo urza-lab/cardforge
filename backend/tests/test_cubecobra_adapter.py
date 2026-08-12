@@ -67,6 +67,37 @@ def test_fetch_and_parse_maps_fields(monkeypatch: pytest.MonkeyPatch):
     assert fetch_result.deck_name is None
 
 
+def test_fetch_and_parse_tolerates_malformed_row_with_extra_columns(monkeypatch: pytest.MonkeyPatch):
+    """Real bug found live: a free-text "Notes" cell on CubeCobra's own
+    export with an unescaped quote character shifts every later column on
+    that one row, so csv.DictReader stashes the overflow under a `None`
+    key - csv.DictWriter used to raise on that and abort the *whole*
+    cube's import over a single bad row, even though every field this
+    adapter actually maps (name/Set/Collector Number/Finish/board/tags)
+    sits earlier in the row than where the real export breaks.
+    """
+    malformed_csv = (
+        "name,CMC,Type,Color,Set,Collector Number,Rarity,Color Category,status,Finish,board,maybeboard,"
+        "image URL,image Back URL,tags,Notes,MTGO ID,Custom,Voucher,Artist\r\n"
+        '"Ornithopter",0,"Artifact Creature",,"mrd","224",uncommon,Colorless,"Owned","Non-foil","mainboard",false,,,'
+        '"","Cube Commonwealth Indy KC" -- an unescaped quote shifts everything after this,12345,false,false,'
+        'Dana Knutson\r\n'
+        '"Sol Ring",1,"Artifact",,"c21","263",uncommon,null,"Not Owned","Non-foil","mainboard",false,,,'
+        '"","",12345,false,false,"Artist A"\r\n'
+    )
+    monkeypatch.setattr(cubecobra, "guarded_get", lambda url, **kwargs: _response(200, malformed_csv))
+
+    fetch_result = cubecobra.fetch_and_parse("https://cubecobra.com/cube/list/modovintage", user_agent="test-agent")
+    result = fetch_result.parse_result
+
+    assert result.error_rows == []
+    by_name = {row.mapped["name"]: row.mapped for row in result.valid_rows}
+    assert "Ornithopter" in by_name
+    assert by_name["Ornithopter"]["set_code"] == "MRD"
+    assert by_name["Ornithopter"]["section"] == "mainboard"
+    assert "Sol Ring" in by_name  # a later, well-formed row still parses fine too
+
+
 def test_fetch_and_parse_raises_auth_required_on_403(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(cubecobra, "guarded_get", lambda url, **kwargs: _response(403))
     with pytest.raises(AuthRequiredError):

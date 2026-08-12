@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { apiGet, ApiError } from "../api/client";
-import type { DashboardSummary } from "../types/dashboard";
+import { useSort } from "../hooks/useSort";
+import type { DashboardSummary, ListBuildability } from "../types/dashboard";
 import type { UserSettings } from "../types/settings";
 
 export default function Dashboard() {
@@ -10,6 +11,17 @@ export default function Dashboard() {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [grafanaEmbedUrl, setGrafanaEmbedUrl] = useState<string | null>(null);
+
+  const { sorted: sortedBuildability, sortKey, direction, toggleSort } = useSort<ListBuildability>(
+    summary?.list_buildability ?? [],
+    "coverage_percent",
+    "asc",
+  );
+
+  function sortIndicator(key: keyof ListBuildability) {
+    if (sortKey !== key) return "";
+    return direction === "asc" ? " ▲" : " ▼";
+  }
 
   useEffect(() => {
     apiGet<DashboardSummary>("/dashboard")
@@ -88,14 +100,26 @@ export default function Dashboard() {
             <table className="cf-table">
               <thead>
                 <tr>
-                  <th>{t("listsPage.columns.name")}</th>
-                  <th>{t("listsPage.columns.type")}</th>
-                  <th>{t("comparisonsPage.coverage")}</th>
-                  <th>{t("dashboardPage.buildable")}</th>
+                  <th className="cf-th-sortable" onClick={() => toggleSort("name")}>
+                    {t("listsPage.columns.name")}
+                    {sortIndicator("name")}
+                  </th>
+                  <th className="cf-th-sortable" onClick={() => toggleSort("list_type")}>
+                    {t("listsPage.columns.type")}
+                    {sortIndicator("list_type")}
+                  </th>
+                  <th className="cf-th-sortable" onClick={() => toggleSort("coverage_percent")}>
+                    {t("comparisonsPage.coverage")}
+                    {sortIndicator("coverage_percent")}
+                  </th>
+                  <th className="cf-th-sortable" onClick={() => toggleSort("is_fully_buildable")}>
+                    {t("dashboardPage.buildable")}
+                    {sortIndicator("is_fully_buildable")}
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {summary.list_buildability.map((lb) => (
+                {sortedBuildability.map((lb) => (
                   <tr key={lb.list_id}>
                     <td>
                       <Link to={`/lists/${lb.list_id}`}>{lb.name}</Link>

@@ -216,6 +216,21 @@ def get_import(db: Session, import_id: int, user_id: int = DEFAULT_USER_ID) -> L
     return import_record
 
 
+def _truncate(value: str | None, max_length: int) -> str | None:
+    """Defensively bounds a field to its own CardListItem column width
+    before insert. A parsed row can be syntactically well-formed but still
+    carry a value too long for its column - confirmed live against a real
+    CubeCobra export: an unescaped quote character inside one card's own
+    name shifted that row's later columns, landing an unrelated 17-char
+    artist name in the 16-char `set_code` slot. Without this, one such row
+    raised a raw `StringDataRightTruncation` from Postgres and aborted the
+    *entire* import's commit, not just that row - the same "one bad row
+    shouldn't sink 250 good ones" reasoning as `skip_bad_rows` itself,
+    just for a failure mode caught at insert time instead of parse time.
+    """
+    return value if value is None or len(value) <= max_length else value[:max_length]
+
+
 def confirm_import(db: Session, import_record: ListImport, *, skip_bad_rows: bool) -> ListImport:
     if import_record.status != ListImportStatus.previewed.value:
         raise ListImportNotPreviewedError(import_record.status)
@@ -229,16 +244,16 @@ def confirm_import(db: Session, import_record: ListImport, *, skip_bad_rows: boo
         assert mapped is not None  # ok rows always have mapped_data (see parsers/common.py)
         item = CardListItem(
             list_id=import_record.list_id,
-            card_name=mapped["name"],
-            set_code=mapped["set_code"],
-            set_name=mapped["set_name"],
-            collector_number=mapped["collector_number"],
+            card_name=_truncate(mapped["name"], 256),
+            set_code=_truncate(mapped["set_code"], 16),
+            set_name=_truncate(mapped["set_name"], 128),
+            collector_number=_truncate(mapped["collector_number"], 32),
             quantity=mapped["quantity"],
             section=mapped.get("section") or "mainboard",
-            category=mapped.get("category"),
+            category=_truncate(mapped.get("category"), 64),
             tags=mapped.get("tags"),
             foil=mapped["foil"],
-            language=mapped["language"],
+            language=_truncate(mapped["language"], 8),
             scryfall_id=mapped["scryfall_id"],
             source_import_id=import_record.id,
         )

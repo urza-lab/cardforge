@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import pytest
 from app.core.database import get_sessionmaker
 from app.main import app
 from app.models.cubecobra import PopularCube
+from app.parsers.common import ParsedRow, ParseResult
+from app.source_adapters import cubecobra
+from app.source_adapters.common import DeckFetchResult
+from app.source_adapters.errors import SourceFetchError
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
 
-def _seed_cube(**overrides: object) -> None:
+def _seed_cube(**overrides: object) -> PopularCube:
     defaults: dict[str, object] = {
         "external_id": "abc",
         "short_id": "topcube",
@@ -22,10 +27,32 @@ def _seed_cube(**overrides: object) -> None:
     defaults.update(overrides)
     db = get_sessionmaker()()
     try:
-        db.add(PopularCube(**defaults))
+        cube = PopularCube(**defaults)
+        db.add(cube)
         db.commit()
+        db.refresh(cube)
+        return cube
     finally:
         db.close()
+
+
+def _fetch_result() -> DeckFetchResult:
+    return DeckFetchResult(
+        deck_name=None,
+        parse_result=ParseResult(
+            rows=[
+                ParsedRow(
+                    row_number=1,
+                    raw={"name": "Sol Ring"},
+                    mapped={
+                        "name": "Sol Ring", "quantity": 1, "set_code": None, "set_name": None,
+                        "collector_number": None, "language": None, "scryfall_id": None, "section": "mainboard",
+                        "category": None, "tags": None, "foil": False,
+                    },
+                )
+            ]
+        ),
+    )
 
 
 def test_status_starts_not_started():
@@ -60,3 +87,34 @@ def test_list_cubes_sorted_by_likes_and_cards():
 
     by_cards = client.get("/api/cube-discover/cubes?sort=cards").json()
     assert [c["name"] for c in by_cards] == ["A", "B"]
+
+
+def test_import_cube_success(monkeypatch: pytest.MonkeyPatch):
+    cube = _seed_cube(external_id="import-me", name="Import Me")
+    monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result())
+
+    resp = client.post(f"/api/cube-discover/cubes/{cube.id}/import")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["imported_list_id"] is not None
+    assert body["import_error"] is None
+
+
+def test_import_cube_failure_returns_200_with_error(monkeypatch: pytest.MonkeyPatch):
+    cube = _seed_cube(external_id="fail-me", name="Fail Me")
+
+    def _boom(url: str, user_agent: str) -> DeckFetchResult:
+        raise SourceFetchError("cubecobra unreachable")
+
+    monkeypatch.setattr(cubecobra, "fetch_and_parse", _boom)
+
+    resp = client.post(f"/api/cube-discover/cubes/{cube.id}/import")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["imported_list_id"] is None
+    assert "cubecobra unreachable" in body["import_error"]
+
+
+def test_import_cube_404_for_unknown_cube():
+    resp = client.post("/api/cube-discover/cubes/999999/import")
+    assert resp.status_code == 404

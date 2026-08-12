@@ -16,5 +16,10 @@ export interface PopularCube {
   card_count: number;
   like_count: number;
   tags: string[] | null;
+  num_decks: number | null;
+  date_last_updated: string | null;
   synced_at: string;
+  imported_list_id: number | null;
+  import_error: string | null;
+  import_attempted_at: string | null;
 }

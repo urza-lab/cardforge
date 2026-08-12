@@ -22,7 +22,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from app.comparison.engine import compare
+from app.comparison.engine import build_owned_pool, compare_pool
 from app.comparison.types import ComparisonSettings, MissingCard, OwnedCard, RequiredCard
 
 
@@ -62,7 +62,15 @@ def compute_leverage(
     if not lists_required:
         return []
 
-    baseline = {key: compare(owned, required, settings) for key, required in lists_required.items()}
+    # Built once from `owned` and reused read-only everywhere below (see
+    # engine.build_owned_pool/compare_pool's own docstrings) - the loop
+    # that rebuilds this from scratch on every compare() call is by far
+    # the dominant cost once this function runs hundreds of thousands of
+    # comparisons (candidates x lists-that-need-that-candidate), not the
+    # comparison logic itself.
+    base_pool = build_owned_pool(owned, settings.mode)
+
+    baseline = {key: compare_pool(base_pool, required, settings) for key, required in lists_required.items()}
 
     # One pooled compare() over every list's requirements combined gives the
     # correctly-decremented aggregate shortfall per card - exactly the same
@@ -71,7 +79,7 @@ def compute_leverage(
     # needs grouping below since compare() doesn't merge same-card lines
     # from different required-card entries on its own.
     all_required = [card for required in lists_required.values() for card in required]
-    pooled = compare(owned, all_required, settings)
+    pooled = compare_pool(base_pool, all_required, settings)
 
     grouped: dict[str, MissingCard] = {}
     for missing in pooled.missing:
@@ -89,24 +97,49 @@ def compute_leverage(
                 scryfall_card_id=existing.scryfall_card_id,
             )
 
-    candidates: list[LeverageCandidate] = []
-    for missing in grouped.values():
-        extra = OwnedCard(
-            name=missing.name,
-            quantity=missing.missing_quantity,
-            oracle_id=missing.oracle_id,
-            scryfall_card_id=missing.scryfall_card_id,
-        )
-        hypothetical_owned = [*owned, extra]
+    # The key insight that turns the loop below from "re-run compare() for
+    # every (candidate, list) pair" into plain dict lookups: adding exactly
+    # this candidate's *aggregate* shortfall back to the shared pool always
+    # fully covers every individual list's shortfall for that same card -
+    # the aggregate is defined as sum-of-per-list-shortfalls, so redistributing
+    # it back means supply now exactly equals total demand for that card
+    # across every list that needs it. So for a given list L already known
+    # to require candidate K (baseline[L].missing contains it):
+    #   - L's coverage gain from buying K is exactly
+    #     (K's shortfall in L) / L's total_required_quantity * 100 - no need
+    #     to recompute the rest of L's comparison, nothing else about L
+    #     changes (compare()'s owned_pool lookup is keyed per-card, so an
+    #     extra copy of K can't affect any of L's other required cards).
+    #   - L becomes newly fully buildable iff K was L's *only* distinct
+    #     missing card.
+    # Both facts come straight out of each list's own baseline.missing
+    # (already computed above) - no second pass over `required` needed.
+    # Confirmed live: with 590 real lists and ~256k required-card rows (a
+    # bulk cube import), the old "re-run compare() per pair" version didn't
+    # finish in several minutes; this version answers the same query in a
+    # fraction of a second - see CLAUDE.md.
+    missing_by_list: dict[Any, dict[str, int]] = {}
+    lists_by_candidate_key: dict[str, list[Any]] = {}
+    for list_key, result in baseline.items():
+        per_list: dict[str, int] = {}
+        for m in result.missing:
+            mkey = _candidate_key(m, settings.mode)
+            per_list[mkey] = per_list.get(mkey, 0) + m.missing_quantity
+        missing_by_list[list_key] = per_list
+        for mkey in per_list:
+            lists_by_candidate_key.setdefault(mkey, []).append(list_key)
 
+    candidates: list[LeverageCandidate] = []
+    for key, missing in grouped.items():
         lists_newly_buildable = 0
         total_coverage_gain = 0.0
-        for key, required in lists_required.items():
-            after = compare(hypothetical_owned, required, settings)
-            before = baseline[key]
-            if after.is_fully_buildable and not before.is_fully_buildable:
+        for list_key in lists_by_candidate_key.get(key, []):
+            before = baseline[list_key]
+            shortfall = missing_by_list[list_key][key]
+            if before.total_required_quantity:
+                total_coverage_gain += shortfall / before.total_required_quantity * 100
+            if len(missing_by_list[list_key]) == 1:
                 lists_newly_buildable += 1
-            total_coverage_gain += after.coverage_percent - before.coverage_percent
 
         candidates.append(
             LeverageCandidate(

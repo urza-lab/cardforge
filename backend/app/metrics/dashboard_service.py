@@ -8,6 +8,7 @@ separate calls itself.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -16,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.comparison import ComparisonSettings, LeverageCandidate, compute_leverage
-from app.comparison.engine import compare
+from app.comparison.engine import build_owned_pool, compare_pool
 from app.comparison.types import MissingCard, RequiredCard
 from app.models.collection import CollectionItem
 from app.models.lists import CardList
@@ -24,7 +25,7 @@ from app.models.pricing import PriceObservation, PriceProvider, PriceSyncState
 from app.models.scryfall import SYNC_STATE_ID, ScryfallCard, ScryfallSyncState
 from app.models.user import DEFAULT_USER_ID
 from app.services import collection_service, pricing_service
-from app.services.comparison_service import _owned_cards, _required_cards_for_lists
+from app.services.comparison_service import _owned_cards, required_cards_by_list
 
 # Capped so a household with dozens of decks/cubes doesn't turn every
 # dashboard load into an O(candidates x lists) leverage computation over
@@ -32,6 +33,25 @@ from app.services.comparison_service import _owned_cards, _required_cards_for_li
 # not being batched. 10 is enough to answer "what should I buy next", not
 # meant as an exhaustive report.
 TOP_LEVERAGE_COUNT = 10
+
+# Postgres hard-caps a single query at 65535 bound parameters - an IN(...)
+# clause built from a real, large card-id set (hundreds of lists' worth of
+# missing cards, confirmed live to reach tens of thousands of distinct ids,
+# see CLAUDE.md) can exceed that and fail the query outright, not just run
+# slowly. Chunking well under the ceiling keeps every batch safe regardless
+# of how large the real set grows.
+_IN_CLAUSE_CHUNK_SIZE = 5000
+
+
+def _chunked(items: Iterable[str], size: int = _IN_CLAUSE_CHUNK_SIZE) -> Iterator[list[str]]:
+    chunk: list[str] = []
+    for item in items:
+        chunk.append(item)
+        if len(chunk) >= size:
+            yield chunk
+            chunk = []
+    if chunk:
+        yield chunk
 
 
 @dataclass(frozen=True)
@@ -86,13 +106,18 @@ def compute_list_buildability(
     lists = list(db.scalars(select(CardList).where(CardList.user_id == user_id)))
     owned = _owned_cards(db, collection.id)
     settings = ComparisonSettings(mode="oracle")
+    # Built once and reused read-only across every list's compare_pool()
+    # call below (see engine.build_owned_pool/compare_pool's own
+    # docstrings) - compare()'s own per-call pool rebuild is the dominant
+    # cost once there are hundreds of lists, not the comparison itself.
+    owned_pool = build_owned_pool(owned, settings.mode)
+
+    lists_required = required_cards_by_list(db, [card_list.id for card_list in lists])
 
     list_buildability: list[ListBuildability] = []
-    lists_required: dict[int, list[RequiredCard]] = {}
     for card_list in lists:
-        required = _required_cards_for_lists(db, [card_list.id])
-        lists_required[card_list.id] = required
-        result = compare(owned, required, settings)
+        required = lists_required[card_list.id]
+        result = compare_pool(owned_pool, required, settings)
         list_buildability.append(
             ListBuildability(
                 list_id=card_list.id,
@@ -133,27 +158,35 @@ def compute_list_missing_cost(
         m.scryfall_card_id for lb in list_buildability for m in lb.missing if not m.oracle_id and m.scryfall_card_id
     }
 
-    # oracle_id -> every printing's scryfall_card_id (oracle-mode pricing
-    # takes the cheapest printing, same "any printing satisfies this"
-    # philosophy as oracle-mode comparison itself).
+    # oracle_id -> every *priced* printing's scryfall_card_id (oracle-mode
+    # pricing takes the cheapest printing, same "any printing satisfies
+    # this" philosophy as oracle-mode comparison itself). A single JOINed
+    # query per oracle_id chunk, filtered to this profile's currency/foil
+    # up front, rather than first fetching *every* printing of every
+    # candidate oracle_id (confirmed live to reach 400k+ rows for ~24k
+    # oracle_ids - most of the real Scryfall mirror - see CLAUDE.md) and
+    # only then discovering which of those even have a price. Real decks/
+    # cubes only have prices for a fraction of all printings, so this join
+    # touches far fewer rows in practice.
     printings_by_oracle: dict[str, list[str]] = {}
-    if oracle_ids:
-        for card_id, oracle_id in db.execute(
-            select(ScryfallCard.id, ScryfallCard.oracle_id).where(ScryfallCard.oracle_id.in_(oracle_ids))
+    price_by_card_provider: dict[tuple[str, str], Decimal] = {}
+    for chunk in _chunked(oracle_ids):
+        for oracle_id, card_id, provider, price in db.execute(
+            select(ScryfallCard.oracle_id, PriceObservation.scryfall_card_id, PriceObservation.provider, PriceObservation.price)
+            .join(PriceObservation, PriceObservation.scryfall_card_id == ScryfallCard.id)
+            .where(
+                ScryfallCard.oracle_id.in_(chunk),
+                PriceObservation.currency == profile.currency,
+                PriceObservation.foil == profile.prefer_foil,
+            )
         ):
             printings_by_oracle.setdefault(oracle_id, []).append(card_id)
+            price_by_card_provider[(card_id, provider)] = price
 
-    all_card_ids = {cid for ids in printings_by_oracle.values() for cid in ids} | direct_card_ids
-
-    # (scryfall_card_id, provider) -> price, one query total instead of one
-    # per (card, provider) pair - already scoped to this profile's currency/
-    # foil preference, so resolving a price from here on is a plain
-    # in-memory provider-priority walk with no further DB access.
-    price_by_card_provider: dict[tuple[str, str], Decimal] = {}
-    if all_card_ids:
+    for chunk in _chunked(direct_card_ids):
         for card_id, provider, price in db.execute(
             select(PriceObservation.scryfall_card_id, PriceObservation.provider, PriceObservation.price).where(
-                PriceObservation.scryfall_card_id.in_(all_card_ids),
+                PriceObservation.scryfall_card_id.in_(chunk),
                 PriceObservation.currency == profile.currency,
                 PriceObservation.foil == profile.prefer_foil,
             )
@@ -171,11 +204,20 @@ def compute_list_missing_cost(
                     break  # this printing's cheapest-available-provider price is settled - move on
         return best
 
+    # Precomputed once per distinct oracle_id/card_id, not once per missing
+    # *line* - the same card can be missing from dozens of lists, and this
+    # loop previously recomputed its cheapest price from scratch every
+    # single time (confirmed live: ~255k missing lines across 590 real
+    # lists, but only ~24k distinct oracle_ids among them - a ~10x
+    # redundant-work factor, see CLAUDE.md).
+    cheapest_by_oracle = {oracle_id: cheapest_price(ids) for oracle_id, ids in printings_by_oracle.items()}
+    cheapest_by_card_id = {card_id: cheapest_price([card_id]) for card_id in direct_card_ids}
+
     def price_for(missing: MissingCard) -> Decimal | None:
         if missing.oracle_id:
-            return cheapest_price(printings_by_oracle.get(missing.oracle_id, []))
+            return cheapest_by_oracle.get(missing.oracle_id)
         if missing.scryfall_card_id:
-            return cheapest_price([missing.scryfall_card_id])
+            return cheapest_by_card_id.get(missing.scryfall_card_id)
         return None
 
     results: list[ListMissingCost] = []

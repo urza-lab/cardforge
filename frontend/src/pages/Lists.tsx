@@ -1,17 +1,24 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { apiDelete, apiGet, apiPostJson, ApiError } from "../api/client";
 import { useSort } from "../hooks/useSort";
+import type { DashboardSummary } from "../types/dashboard";
 import type { CardList, ListType } from "../types/lists";
+
+interface CardListRow extends CardList {
+  coverage_percent: number | null;
+}
 
 export default function Lists() {
   const { t } = useTranslation();
   const [lists, setLists] = useState<CardList[] | null>(null);
+  const [coverageByListId, setCoverageByListId] = useState<Record<number, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [listType, setListType] = useState<ListType>("deck");
   const [creating, setCreating] = useState(false);
+  const [typeFilter, setTypeFilter] = useState<"all" | ListType>("all");
 
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -29,11 +36,34 @@ export default function Lists() {
         });
       })
       .catch((err: unknown) => setError(err instanceof ApiError ? err.message : String(err)));
+    // Coverage % per list piggybacks on the dashboard's own already-computed
+    // buildability numbers (app.metrics.dashboard_service) rather than a
+    // second comparison engine call per list here - loaded separately so a
+    // slow dashboard computation (real collections with many lists can take
+    // several seconds, see CLAUDE.md) doesn't delay the list table itself
+    // from rendering; the Coverage column just fills in once it resolves.
+    apiGet<DashboardSummary>("/dashboard")
+      .then((summary) => {
+        const map: Record<number, number> = {};
+        for (const lb of summary.list_buildability) map[lb.list_id] = lb.coverage_percent;
+        setCoverageByListId(map);
+      })
+      .catch(() => {
+        // Coverage column just stays empty if this fails - not fatal to the page.
+      });
   }
 
   useEffect(reload, []);
 
-  const { sorted, sortKey, direction, toggleSort } = useSort<CardList>(lists ?? [], "created_at", "desc");
+  const rows: CardListRow[] = useMemo(
+    () =>
+      (lists ?? [])
+        .filter((l) => typeFilter === "all" || l.list_type === typeFilter)
+        .map((l) => ({ ...l, coverage_percent: coverageByListId[l.id] ?? null })),
+    [lists, coverageByListId, typeFilter],
+  );
+
+  const { sorted, sortKey, direction, toggleSort } = useSort<CardListRow>(rows, "created_at", "desc");
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -51,7 +81,7 @@ export default function Lists() {
     }
   }
 
-  function sortIndicator(key: keyof CardList) {
+  function sortIndicator(key: keyof CardListRow) {
     if (sortKey !== key) return "";
     return direction === "asc" ? " ▲" : " ▼";
   }
@@ -154,6 +184,21 @@ export default function Lists() {
         {lists && lists.length > 0 && (
           <>
             {bulkError && <div className="cf-alert cf-alert-error">{bulkError}</div>}
+            <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "flex-end", gap: 10 }}>
+              <div>
+                <label htmlFor="list-type-filter">{t("listsPage.filterType")}</label>
+                <select
+                  id="list-type-filter"
+                  className="cf-select"
+                  value={typeFilter}
+                  onChange={(e) => setTypeFilter(e.target.value as "all" | ListType)}
+                >
+                  <option value="all">{t("listsPage.filterAll")}</option>
+                  <option value="deck">{t("listsPage.types.deck")}</option>
+                  <option value="cube">{t("listsPage.types.cube")}</option>
+                </select>
+              </div>
+            </div>
             <div className="cf-btn-row" style={{ alignItems: "center", gap: 10 }}>
               <button
                 className="cf-btn"
@@ -199,6 +244,10 @@ export default function Lists() {
                       {t("listsPage.columns.created")}
                       {sortIndicator("created_at")}
                     </th>
+                    <th className="cf-th-sortable" onClick={() => toggleSort("coverage_percent")}>
+                      {t("listsPage.columns.coverage")}
+                      {sortIndicator("coverage_percent")}
+                    </th>
                     <th>{t("sourcesPage.columns.status")}</th>
                   </tr>
                 </thead>
@@ -217,6 +266,7 @@ export default function Lists() {
                       </td>
                       <td>{t(`listsPage.types.${item.list_type}`)}</td>
                       <td>{new Date(item.created_at).toLocaleDateString()}</td>
+                      <td>{item.coverage_percent !== null ? `${item.coverage_percent.toFixed(0)}%` : "—"}</td>
                       <td>
                         {item.source_url && (
                           <span

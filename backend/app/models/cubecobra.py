@@ -14,7 +14,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import Integer, String, func
+from sqlalchemy import ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -44,7 +44,27 @@ class PopularCube(Base):
     card_count: Mapped[int] = mapped_column(Integer, default=0)
     like_count: Mapped[int] = mapped_column(Integer, default=0)
     tags: Mapped[list[str] | None] = mapped_column(JSONB)
+    # Real quality/popularity signals beyond likeCount (user-requested) -
+    # see app/source_adapters/cubecobra.py's PopularCubeEntry docstring for
+    # why these two and not a comment count or star rating (neither exists
+    # in CubeCobra's real search response, confirmed live).
+    num_decks: Mapped[int | None] = mapped_column(Integer)
+    date_last_updated: Mapped[datetime | None] = mapped_column()
     synced_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
+
+    # Server-side import tracking (user-requested) - a browse page reload
+    # or a routine resync must not lose "already imported"/"failed, retry"
+    # state the way ephemeral React state did before. ON DELETE SET NULL:
+    # if the user deletes the imported CardList directly, this cube should
+    # go back to showing "Import" rather than a dead link. Preserved across
+    # `run_cube_discovery_sync`'s delete+reinsert by snapshotting/restoring
+    # keyed on `external_id` - same pattern as scryfall.py's run_bulk_sync
+    # preserving price_observations across a full scryfall_cards wipe (see
+    # CLAUDE.md gotcha #19) - without that, this whole feature would reset
+    # to "not imported" on every routine sync.
+    imported_list_id: Mapped[int | None] = mapped_column(ForeignKey("card_lists.id", ondelete="SET NULL"))
+    import_error: Mapped[str | None] = mapped_column(String(1024))
+    import_attempted_at: Mapped[datetime | None] = mapped_column()
 
 
 class CubeDiscoverySyncState(Base):

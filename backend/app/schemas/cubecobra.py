@@ -25,4 +25,9 @@ class PopularCubeRead(BaseModel):
     card_count: int
     like_count: int
     tags: list[str] | None
+    num_decks: int | None
+    date_last_updated: datetime | None
     synced_at: datetime
+    imported_list_id: int | None
+    import_error: str | None
+    import_attempted_at: datetime | None

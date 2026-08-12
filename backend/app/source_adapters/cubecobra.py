@@ -22,6 +22,7 @@ import csv
 import io
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import httpx
@@ -71,6 +72,15 @@ class PopularCubeEntry:
     card_count: int
     like_count: int
     tags: list[str] | None
+    # Real quality/popularity signals beyond likeCount, user-requested after
+    # checking what CubeCobra's own search response actually exposes (no
+    # comment count or star rating exists in that payload - confirmed live,
+    # see CLAUDE.md): numDecks is how many real decks have been built from
+    # this cube (the same "num_decks" concept EDHREC's own real per-
+    # commander stats use), dateLastUpdated is when the cube's owner last
+    # edited it on CubeCobra itself.
+    num_decks: int | None
+    date_last_updated: datetime | None
 
 
 def validate_url(url: str) -> bool:
@@ -101,11 +111,22 @@ def _inject_quantity_column(csv_text: str) -> str:
     hard-requires a detected quantity column for any CSV source, so one is
     added here (adapter-local pre-processing) rather than changing that
     shared parser's behavior for every other CSV caller.
+
+    `extrasaction="ignore"` on the writer: a real CubeCobra export can have
+    a malformed row (confirmed live - a free-text "Notes" cell with an
+    unescaped quote character shifts every later column on that one row),
+    which makes `csv.DictReader` stash the overflow under a `None` key.
+    `csv.DictWriter` raises on an unrecognized key by default, which was
+    aborting the *entire* cube's import over a single bad row - even
+    though every field this adapter actually maps (name/Set/Collector
+    Number/Finish/board/tags, see `_CSV_COLUMN_MAPPING`) sits earlier in
+    the row than where CubeCobra's export breaks, so silently dropping the
+    unrecognized overflow doesn't lose anything this adapter uses.
     """
     reader = csv.DictReader(io.StringIO(csv_text))
     fieldnames = list(reader.fieldnames or []) + ["Quantity"]
     out = io.StringIO()
-    writer = csv.DictWriter(out, fieldnames=fieldnames)
+    writer = csv.DictWriter(out, fieldnames=fieldnames, extrasaction="ignore")
     writer.writeheader()
     for row in reader:
         row["Quantity"] = "1"
@@ -175,6 +196,7 @@ def fetch_popular_cubes(user_agent: str, *, pages: int = POPULAR_CUBES_PAGES) ->
             if not cube_id:
                 continue
             short_id = c.get("shortId") or cube_id
+            date_last_updated_ms = c.get("dateLastUpdated")
             entries.append(
                 PopularCubeEntry(
                     external_id=str(cube_id),
@@ -185,6 +207,10 @@ def fetch_popular_cubes(user_agent: str, *, pages: int = POPULAR_CUBES_PAGES) ->
                     card_count=c.get("cardCount") or 0,
                     like_count=c.get("likeCount") or 0,
                     tags=c.get("tags") or None,
+                    num_decks=c.get("numDecks"),
+                    date_last_updated=(
+                        datetime.fromtimestamp(date_last_updated_ms / 1000, tz=UTC) if date_last_updated_ms else None
+                    ),
                 )
             )
 

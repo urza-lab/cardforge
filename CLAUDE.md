@@ -427,6 +427,68 @@ no re-fetch; the cached price survived a full `docker compose up -d
 --build` cycle. 343 backend tests pass; `ruff`, `mypy`, and the frontend
 `lint`/`build` are all clean.
 
+**Discover Cubes: server-side import tracking, retry/retry-all, and a real
+production performance incident, all in one user-requested batch.** The
+user asked for Discover Cubes to (1) keep showing "View list" for an
+already-imported cube after a resync instead of reverting to "Import", (2)
+mark failed imports and offer a retry button plus a "retry all failed"
+action with a count and an ETA, and (3) investigated a real bug they'd
+hit: some cubes came back empty with no source recorded after a bulk
+import. Building this replaced the frontend's old 3-call client-
+orchestrated import (`create list` → `preview-url` → `confirm`, with no
+persisted outcome) with one backend endpoint (`POST /api/cube-discover/
+cubes/{id}/import`) that does the same sequence but persists the result
+directly on the `PopularCube` row (`imported_list_id`, `import_error`,
+`import_attempted_at` - new columns, `ForeignKey(..., ondelete="SET
+NULL")` so deleting the list reverts the cube to "not imported" rather
+than a dead link) - a page reload or a later resync no longer loses
+"already imported"/"failed, retry" state, since `run_cube_discovery_sync`
+now snapshots and restores these three columns across its delete-then-
+reinsert (same pattern as gotcha #19). Investigating item (3) found the
+real root cause directly: a failed import used to leave its already-
+created, now-orphaned empty `CardList` behind - fixed by deleting it on
+any failure after creation. Two smaller, related things landed in the same
+batch: real CubeCobra quality signals beyond `likeCount` (`numDecks` -
+how many real decks have been built from a cube, and `dateLastUpdated`)
+were added as columns/sort options after checking what CubeCobra's search
+response actually exposes (no comment count or star rating exists in that
+payload, confirmed live); and "Decks & Cubes" (`Lists.tsx`) plus the
+Dashboard's own list table both gained sortable columns, including
+sorting by coverage % (reusing `GET /api/dashboard`'s already-computed
+buildability numbers rather than a second comparison call).
+
+Verifying this at real scale turned into a genuine production incident and
+its resolution, not just a feature ship. The user first reported the
+Dashboard hanging (`HTTP 504`) - live investigation traced this to a real
+bulk import they'd previously run (588 cubes, "select all") having pushed
+the collection to 590 lists, which exposed three latent O(n) performance
+bugs that "a household's dozen or so decks" had never triggered before
+(see gotchas #32 and #33 for the full technical detail and fix). With the
+site back up, the user asked to actually run the full 808-cube import (the
+subset not already covered) as a real load test, explicitly to check for
+CubeCobra rate-limiting and confirm no duplicate lists would result - **do
+this only after checking**: 808 sequential real fetches to a third party
+is exactly the kind of thing gotcha #23 warned about, so this was proposed
+as a smaller sample first, and only run at full scale once the user
+confirmed pacing would match what the original (already rate-limit-safe)
+bulk import had used. Result: **0 real CubeCobra rate-limiting across all
+808 real fetches** - every failure encountered was either this project's
+own infrastructure (two brief, self-inflicted `nginx` 502 bursts, each
+exactly coincident with a `docker compose up --build` run *during* the
+live test - not a real bug, just bad timing overlapping deploys with the
+test) or a real, fixable bug in this project's own code (gotchas #34 and
+#35, both found and fixed live because a load test at this scale was the
+first thing ever big/varied enough to hit them). Final state, verified
+live: 1,297 real lists (802 pre-existing + 715 real cubes now correctly
+tracked as imported, up from 580 before this batch - the 10 empty
+orphaned lists from before this fix were deleted, and the two real
+`imported_list_id` cross-links from gotcha #35 were corrected without
+deleting any real card data, per the user's explicit "keep the real
+lists, just fix duplicates" instruction), `GET /api/dashboard` at ~6-7s
+against that real, now-larger dataset (down from an unbounded hang), zero
+remaining `imported_list_id` collisions. 357 backend tests pass; `ruff`,
+`mypy`, and the frontend `lint`/`build` are all clean.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key
@@ -822,6 +884,113 @@ variant of collection leverage (ARCHITECTURE.md).
     that just linearly holds — a sync that used to comfortably fit its
     timeout can stop fitting after a pool-size change even if the naive
     per-request-time-times-request-count math still says it should.
+32. **`app.comparison.leverage.compute_leverage`'s O(candidates x lists)
+    shape, and `compare()`'s per-call owned-pool rebuild, were both fine at
+    "dozens of decks/cubes" but became a real, live, site-wide outage once
+    a real bulk import pushed the collection to 590+ lists** (found live:
+    a user-triggered "select all" bulk import of the CubeCobra discovery
+    cache). Symptom was `GET /api/dashboard` hanging past nginx's timeout
+    (`HTTP 504`), which cascaded into blocking *unrelated* endpoints too
+    (`GET /api/discover/decks` also appeared to hang) because this
+    project's single uvicorn process has no worker pool - one request
+    doing minutes of synchronous CPU-bound Python blocks every other
+    concurrent request. Root cause, once profiled rather than guessed:
+    `compare()` rebuilds its owned-card pool from scratch on every call
+    (fine for one-off comparisons, ruinous when leverage calls it per
+    candidate-times-list pair - confirmed 25,605 real distinct missing
+    candidates across 590 real lists), *and* the leverage loop re-ran a
+    full `compare()` against *every* list for *every* candidate even
+    though only lists that actually require that candidate can possibly be
+    affected. Fixed in three layers, each verified live against the real
+    dataset before moving to the next: (1) split `compare()` into
+    `build_owned_pool` (called once) + `compare_pool` (reads a pool,
+    tracks per-call duplicate-line consumption in a small local dict
+    instead of mutating/copying the shared pool - `app/comparison/
+    engine.py`); (2) `compute_leverage` replaced the "re-run compare() per
+    (candidate, list) pair" loop with pure dict lookups against each
+    list's own precomputed baseline, since adding a candidate's full
+    aggregate shortfall back to the pool always exactly satisfies every
+    list that needs it (`app/comparison/leverage.py`); (3) `app.metrics.
+    dashboard_service.compute_list_buildability` batched what was an
+    N-queries-one-per-list DB fetch into one (`app.services.
+    comparison_service.required_cards_by_list`), and that query itself was
+    switched from full ORM-entity hydration to plain-column selects (260k+
+    rows of `CardListItem` object instantiation was the dominant cost even
+    after the N+1 fix). Net result on the real 590-list, 260,734-row
+    dataset: `compute_leverage` went from "didn't finish in over two
+    minutes, had to be killed" to ~4s; the full `/api/dashboard` response
+    from an unbounded hang to ~6-7s. Not "infinitely fast" - a genuinely
+    large real collection is still real work - but it completes promptly
+    instead of pegging the process and taking the rest of the app down
+    with it.
+33. **`app.metrics.dashboard_service.compute_list_missing_cost`'s `IN
+    (...)` clauses could exceed Postgres's real 65535-bound-parameter
+    limit and hard-crash `/metrics` outright, not just run slowly** (found
+    live investigating gotcha #32's incident: 23,829 distinct missing
+    oracle_ids at the 590-list scale, fanning out to 433,497 individual
+    printings before this was fixed). Fixed two ways: (1) any `IN` clause
+    built from a real, potentially-large id set is now chunked into
+    batches of 5,000 (`_chunked` helper) so no single query can ever hit
+    the parameter ceiling regardless of how large the real set grows; (2)
+    the printings-by-oracle lookup was rewritten from "fetch every
+    printing of every candidate oracle_id, then separately fetch prices
+    for all of them" into one JOINed query per chunk that only returns
+    printings that actually *have* a price in the profile's currency/foil
+    - real decks/cubes only have prices for a fraction of all printings,
+    so this touches far fewer rows than fetching the full printing set
+    first. A third, separate fix in the same investigation: the per-
+    candidate cheapest-price lookup was being recomputed from scratch for
+    every *missing line* (255k+ across all lists) instead of once per
+    *distinct* oracle_id (~24k) - caching it cut a redundant ~10x factor.
+    Combined, `/metrics` went from a hard crash to ~5.6s on the real
+    dataset - see gotcha #27 for the original batching this built on top
+    of, which turned out insufficient once real list counts grew this far
+    past "a household's dozen or so decks."
+34. **A real CubeCobra CSV export can have a malformed row that silently
+    breaks column alignment for everything after it, in two different
+    ways this project hit live** - both traced to a free-text cell (a
+    card's own "Notes" field) containing an unescaped quote character,
+    which shifts every later column on that one row. (a) `csv.DictReader`
+    stashes the resulting overflow under a `None` key, and `csv.
+    DictWriter`'s default `extrasaction="raise"` aborted the *entire*
+    cube's import over that one row (`app/source_adapters/cubecobra.py`
+    `_inject_quantity_column`, fixed with `extrasaction="ignore"` - safe
+    here specifically because every field this adapter actually maps sits
+    earlier in the row than where real CubeCobra exports break). (b) A
+    worse case of the same shift landed an unrelated 17-character artist
+    name in the 16-character `set_code` column, which `_inject_quantity_
+    column`'s fix doesn't touch (the value fit into a *real* column, it
+    was just too long for it) - this raised a raw `psycopg.errors.
+    StringDataRightTruncation` from `confirm_import`'s bulk insert and
+    aborted that entire list's confirm. Fixed generally, not CubeCobra-
+    specifically, since any source's data could in principle be too long
+    for its column: `app.services.list_import_service.confirm_import` now
+    truncates every string field to its own `CardListItem` column width
+    before insert (`_truncate` helper) - "one malformed row" now degrades
+    to "one row with wrong/truncated data" instead of sinking the other
+    ~250 good rows in the same import. Both found live via a real 808-cube
+    bulk-import load test (see below), not synthetic testing.
+35. **A same-named list is not proof it's the same cube** - two distinct
+    real CubeCobra cubes can share an identical display name (confirmed
+    live against real data: 26 different names, one - "Commander Cube" -
+    shared by 5 different owners' real, different cubes). The first
+    version of `import_popular_cube`'s "adopt an existing same-named list
+    instead of crashing on the `(user_id, name)` uniqueness constraint"
+    logic (see the "Discover Cubes" feature paragraph below) didn't check
+    for this, and live data confirmed it went wrong twice for real: one
+    list ended up referenced by two different `PopularCube` rows at once,
+    and in one case a 540-card cube got silently marked "imported" against
+    a *different* cube's real 548-card list. Fixed by checking, before
+    ever adopting or reusing a same-named list, whether that name is
+    ambiguous (more than one distinct `external_id` currently shares it) -
+    an ambiguous cube always gets its own disambiguated list name
+    (`f"{name} ({short_id})"`) instead of ever touching a list that might
+    belong to a different real cube. The two already-corrupted rows found
+    live were corrected by hand (one had a real matching item count and
+    was left linked; the other two were genuinely indistinguishable by
+    count alone and were reset to unlinked, re-importable state) - see
+    ARCHITECTURE.md for why "keep the real card lists, just fix the
+    linking" was the right call rather than deleting anything.
 
 ## Principles to keep enforcing in later phases
 

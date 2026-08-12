@@ -28,3 +28,18 @@ def trigger_sync(db: Session = Depends(get_db)) -> CubeDiscoverySyncStatusRead:
     except cube_discover_service.SyncAlreadyInProgressError as exc:
         raise HTTPException(status_code=409, detail="a cube discovery sync is already in progress") from exc
     return CubeDiscoverySyncStatusRead.model_validate(state)
+
+
+@router.post("/cubes/{cube_id}/import", response_model=PopularCubeRead)
+def import_popular_cube(cube_id: int, db: Session = Depends(get_db)) -> PopularCubeRead:
+    """Synchronous on-demand/retry import (user-requested) - see
+    cube_discover_service.import_popular_cube for why a failed import
+    comes back as a normal 200 response with `import_error` set, not an
+    HTTP error: it's a real, retryable, trackable outcome, not a server
+    fault. Only a genuinely missing cube raises.
+    """
+    try:
+        cube = cube_discover_service.import_popular_cube(db, cube_id)
+    except cube_discover_service.CubeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="popular cube not found") from exc
+    return PopularCubeRead.model_validate(cube)

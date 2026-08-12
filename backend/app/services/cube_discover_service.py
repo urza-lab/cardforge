@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, insert, select
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from app.core.config import Settings, get_settings
 from app.core.queue import get_queue
@@ -19,10 +19,17 @@ from app.models.cubecobra import (
     CubeDiscoverySyncStatus,
     PopularCube,
 )
+from app.models.lists import CardList, CardListItem
+from app.models.user import DEFAULT_USER_ID
+from app.services import list_import_service, list_service
 from app.source_adapters import cubecobra
 
 
 class SyncAlreadyInProgressError(Exception):
+    pass
+
+
+class CubeNotFoundError(Exception):
     pass
 
 
@@ -63,6 +70,19 @@ def run_cube_discovery_sync(db: Session, settings: Settings | None = None) -> Cu
     try:
         cubes = cubecobra.fetch_popular_cubes(settings.scryfall_user_agent)
 
+        # Snapshot server-side import tracking (imported_list_id/
+        # import_error/import_attempted_at, see app/models/cubecobra.py)
+        # before the wipe, keyed by CubeCobra's own stable external_id -
+        # restored below so "already imported"/"failed, retry" survives a
+        # routine resync instead of silently resetting to "not imported"
+        # every time (same snapshot/restore shape as scryfall.py's
+        # run_bulk_sync preserving price_observations, see CLAUDE.md
+        # gotcha #19).
+        preserved_import_state = {
+            row.external_id: (row.imported_list_id, row.import_error, row.import_attempted_at)
+            for row in db.scalars(select(PopularCube))
+        }
+
         db.execute(delete(PopularCube))
         if cubes:
             db.execute(
@@ -77,9 +97,24 @@ def run_cube_discovery_sync(db: Session, settings: Settings | None = None) -> Cu
                         "card_count": c.card_count,
                         "like_count": c.like_count,
                         "tags": c.tags,
+                        "num_decks": c.num_decks,
+                        "date_last_updated": c.date_last_updated,
                     }
                     for c in cubes
                 ],
+            )
+
+        for external_id, (imported_list_id, import_error, import_attempted_at) in preserved_import_state.items():
+            if imported_list_id is None and import_error is None and import_attempted_at is None:
+                continue
+            db.execute(
+                update(PopularCube)
+                .where(PopularCube.external_id == external_id)
+                .values(
+                    imported_list_id=imported_list_id,
+                    import_error=import_error,
+                    import_attempted_at=import_attempted_at,
+                )
             )
 
         state.status = CubeDiscoverySyncStatus.current.value
@@ -99,6 +134,115 @@ def run_cube_discovery_sync(db: Session, settings: Settings | None = None) -> Cu
 
 
 def list_popular_cubes(db: Session, *, sort: str = "likes") -> list[PopularCube]:
-    order_column = PopularCube.card_count if sort == "cards" else PopularCube.like_count
-    stmt = select(PopularCube).order_by(order_column.desc())
+    order_column: InstrumentedAttribute[int] | InstrumentedAttribute[int | None]
+    if sort == "cards":
+        order_column = PopularCube.card_count
+    elif sort == "decks":
+        order_column = PopularCube.num_decks
+    else:
+        order_column = PopularCube.like_count
+    stmt = select(PopularCube).order_by(order_column.desc().nulls_last())
     return list(db.scalars(stmt))
+
+
+def import_popular_cube(db: Session, cube_id: int, *, user_id: int = DEFAULT_USER_ID) -> PopularCube:
+    """One-click/retry import for a single cached cube (user-requested):
+    creates the CardList and runs the same create-preview-confirm sequence
+    the frontend used to orchestrate itself over three separate calls, but
+    persists the outcome directly on this cube's own row (imported_list_id
+    on success, import_error on failure) so a page reload - or a later
+    resync, see run_cube_discovery_sync's snapshot/restore above - doesn't
+    lose "already imported" or "failed, here's why, retry" state the way
+    ephemeral browser state did before.
+
+    On any failure *after* the CardList was already created, that now-
+    orphaned empty list is deleted rather than left behind with no items
+    and no source_type/source_url. This is a real bug found live: a bulk
+    "select all" import of the full CubeCobra cache left exactly this kind
+    of dangling empty list behind for every cube whose fetch/confirm step
+    failed partway through (network hiccup, CubeCobra rate limiting, an
+    empty/malformed CSV) - see CLAUDE.md.
+
+    A failure is recorded as data (cube.import_error set, HTTP 200), not
+    raised as an HTTP error - a failed import is an expected, retryable
+    outcome here, not a server fault. Only "cube not found" raises.
+    """
+    cube = db.get(PopularCube, cube_id)
+    if cube is None:
+        raise CubeNotFoundError(cube_id)
+
+    if cube.imported_list_id is not None and list_service.get_list(db, cube.imported_list_id, user_id=user_id):
+        return cube  # already imported and the list still exists - nothing to do
+
+    # `card_lists` has a real (user_id, name) uniqueness constraint - a
+    # name collision here is expected, not a corner case, for any cube
+    # already imported before this row-level tracking existed (confirmed
+    # live: a bulk "select all" import of 588 cubes had already claimed
+    # most of these exact names).
+    #
+    # But a same name is NOT reliable proof of "same cube": two distinct
+    # real CubeCobra cubes can share an identical display name (confirmed
+    # live against real data - e.g. 5 different real cubes all named
+    # "Commander Cube", by 5 different owners). Blindly adopting the first
+    # same-named list wrongly attributed one cube's real import to a
+    # completely different cube (two live cases found and corrected - see
+    # CLAUDE.md). So: adoption (or cleaning up an orphaned empty same-named
+    # list to re-attempt under the same name) only happens when this
+    # cube's name is *unambiguous* - no other cached cube currently shares
+    # it. When it's ambiguous, this cube gets its own disambiguated list
+    # name instead of ever touching a list that might belong to a
+    # different real cube.
+    name_is_ambiguous = (
+        db.scalar(
+            select(func.count(func.distinct(PopularCube.external_id))).where(PopularCube.name == cube.name)
+        )
+        or 0
+    ) > 1
+
+    target_name = cube.name
+    if name_is_ambiguous:
+        target_name = f"{cube.name} ({cube.short_id})"
+    else:
+        existing = db.scalars(
+            select(CardList).where(
+                CardList.user_id == user_id, CardList.name == cube.name, CardList.list_type == "cube"
+            )
+        ).first()
+        if existing is not None:
+            has_items = db.scalar(
+                select(func.count()).select_from(CardListItem).where(CardListItem.list_id == existing.id)
+            )
+            if has_items:
+                cube.imported_list_id = existing.id
+                cube.import_error = None
+                cube.import_attempted_at = datetime.now(UTC)
+                db.commit()
+                db.refresh(cube)
+                return cube
+            list_service.delete_list(db, existing)
+
+    settings = get_settings()
+    card_list = list_service.create_list(db, name=target_name, list_type="cube", user_id=user_id)
+    try:
+        import_record, _deck_name = list_import_service.create_preview_from_url(
+            db, card_list=card_list, url=cube.source_url, user_agent=settings.scryfall_user_agent, user_id=user_id
+        )
+        list_import_service.confirm_import(db, import_record, skip_bad_rows=True)
+    except Exception as exc:  # noqa: BLE001 - any failure here must be recorded, not silently swallowed
+        list_service.delete_list(db, card_list)
+        cube = db.get(PopularCube, cube_id)
+        assert cube is not None  # just loaded above; nothing else can delete a PopularCube mid-request
+        cube.import_error = str(exc)[:1024]
+        cube.import_attempted_at = datetime.now(UTC)
+        db.commit()
+        db.refresh(cube)
+        return cube
+
+    cube = db.get(PopularCube, cube_id)
+    assert cube is not None
+    cube.imported_list_id = card_list.id
+    cube.import_error = None
+    cube.import_attempted_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(cube)
+    return cube

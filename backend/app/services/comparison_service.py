@@ -145,6 +145,41 @@ def _required_cards_for_lists(db: Session, list_ids: list[int]) -> list[Required
     ]
 
 
+def required_cards_by_list(db: Session, list_ids: list[int]) -> dict[int, list[RequiredCard]]:
+    """Same rows as `_required_cards_for_lists`, grouped by list_id - one
+    query for every list combined instead of one query per list. Callers
+    that need each list's own required cards separately (e.g.
+    app.metrics.dashboard_service.compute_list_buildability, called on
+    every dashboard load *and* every Prometheus scrape) used to call
+    `_required_cards_for_lists(db, [single_id])` in a loop - an N+1 query
+    pattern invisible at a "household with dozens of decks/cubes" scale
+    (see app/comparison/leverage.py's own note on that assumption) but
+    confirmed live to take ~11s once real usage pushed a real collection
+    past 500 lists (a bulk "select all" cube import - see CLAUDE.md).
+    """
+    # Plain columns, not full CardListItem ORM entities - at real scale
+    # (hundreds of lists, hundreds of thousands of rows) hydrating a full
+    # mapped object per row is itself the dominant cost of this function,
+    # confirmed live to take ~8s on its own even after this was already
+    # one query instead of one-per-list (see CLAUDE.md) - a plain tuple
+    # row needs no identity-map/relationship bookkeeping.
+    rows = db.execute(
+        select(
+            CardListItem.list_id,
+            CardListItem.card_name,
+            CardListItem.quantity,
+            CardListItem.resolved_oracle_id,
+            CardListItem.resolved_scryfall_card_id,
+        ).where(CardListItem.list_id.in_(list_ids), CardListItem.section.in_(REQUIRED_LIST_SECTIONS))
+    )
+    grouped: dict[int, list[RequiredCard]] = {list_id: [] for list_id in list_ids}
+    for list_id, card_name, quantity, oracle_id, scryfall_card_id in rows:
+        grouped[list_id].append(
+            RequiredCard(name=card_name, quantity=quantity, oracle_id=oracle_id, scryfall_card_id=scryfall_card_id)
+        )
+    return grouped
+
+
 def run_list_comparison(
     db: Session, *, list_id: int, collection_id: int, mode: str = "oracle"
 ) -> ComparisonResult:

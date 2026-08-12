@@ -3,15 +3,20 @@ from __future__ import annotations
 import pytest
 from app.core.database import get_sessionmaker
 from app.models.cubecobra import CUBE_DISCOVERY_SYNC_STATE_ID, CubeDiscoverySyncState, PopularCube
-from app.services import cube_discover_service
+from app.models.lists import CardList
+from app.parsers.common import ParsedRow, ParseResult
+from app.services import cube_discover_service, list_service
+from app.source_adapters import cubecobra
+from app.source_adapters.common import DeckFetchResult
 from app.source_adapters.cubecobra import PopularCubeEntry
 from app.source_adapters.errors import SourceFetchError
 
 
-def _entry(external_id: str) -> PopularCubeEntry:
+def _entry(external_id: str, *, name: str | None = None) -> PopularCubeEntry:
     return PopularCubeEntry(
-        external_id=external_id, short_id=external_id, name=f"Cube {external_id}", owner_username="Alice",
+        external_id=external_id, short_id=external_id, name=name or f"Cube {external_id}", owner_username="Alice",
         source_url=f"https://cubecobra.com/cube/list/{external_id}", card_count=360, like_count=100, tags=None,
+        num_decks=42, date_last_updated=None,
     )
 
 
@@ -47,5 +52,232 @@ def test_run_cube_discovery_sync_failure_records_error(monkeypatch: pytest.Monke
         assert state is not None
         assert state.status == "FAILED"
         assert "search failed" in (state.error_message or "")
+    finally:
+        db.close()
+
+
+def test_run_cube_discovery_sync_preserves_import_state_across_resync(monkeypatch: pytest.MonkeyPatch):
+    """A routine resync fully deletes and reinserts every PopularCube row -
+    "already imported"/"failed, retry" must survive that (see
+    app/models/cubecobra.py), matched back up by CubeCobra's own stable
+    external_id, not lost the way it would be with a naive wipe.
+    """
+    monkeypatch.setattr(cube_discover_service.cubecobra, "fetch_popular_cubes", lambda user_agent, **kw: [_entry("a")])
+
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.run_cube_discovery_sync(db)
+        cube = db.query(PopularCube).filter_by(external_id="a").one()
+        card_list = list_service.create_list(db, name="Cube a", list_type="cube")
+        cube.imported_list_id = card_list.id
+        db.commit()
+
+        cube_discover_service.run_cube_discovery_sync(db)
+
+        resynced = db.query(PopularCube).filter_by(external_id="a").one()
+        assert resynced.id != cube.id  # a real new row, not the same one - proves this wasn't just skipped
+        assert resynced.imported_list_id == card_list.id
+    finally:
+        db.close()
+
+
+def _fetch_result(rows: list[tuple[str, int]]) -> DeckFetchResult:
+    parse_result = ParseResult(
+        rows=[
+            ParsedRow(
+                row_number=i + 1,
+                raw={"name": name},
+                mapped={
+                    "name": name, "quantity": qty, "set_code": None, "set_name": None, "collector_number": None,
+                    "language": None, "scryfall_id": None, "section": "mainboard", "category": None,
+                    "tags": None, "foil": False,
+                },
+            )
+            for i, (name, qty) in enumerate(rows)
+        ]
+    )
+    return DeckFetchResult(deck_name=None, parse_result=parse_result)
+
+
+def test_import_popular_cube_success(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(cube_discover_service.cubecobra, "fetch_popular_cubes", lambda user_agent, **kw: [_entry("a")])
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.run_cube_discovery_sync(db)
+        cube = db.query(PopularCube).filter_by(external_id="a").one()
+
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result([("Sol Ring", 1)]))
+
+        result = cube_discover_service.import_popular_cube(db, cube.id)
+
+        assert result.import_error is None
+        assert result.imported_list_id is not None
+        assert result.import_attempted_at is not None
+        imported_list = db.get(CardList, result.imported_list_id)
+        assert imported_list is not None
+        assert imported_list.name == cube.name
+    finally:
+        db.close()
+
+
+def test_import_popular_cube_is_idempotent_when_already_imported(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(cube_discover_service.cubecobra, "fetch_popular_cubes", lambda user_agent, **kw: [_entry("a")])
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.run_cube_discovery_sync(db)
+        cube = db.query(PopularCube).filter_by(external_id="a").one()
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result([("Sol Ring", 1)]))
+
+        first = cube_discover_service.import_popular_cube(db, cube.id)
+        second = cube_discover_service.import_popular_cube(db, cube.id)
+
+        assert second.imported_list_id == first.imported_list_id
+        assert db.query(CardList).count() == 1  # no duplicate list created on the second call
+    finally:
+        db.close()
+
+
+def test_import_popular_cube_cleans_up_orphaned_list_on_failure(monkeypatch: pytest.MonkeyPatch):
+    """The real bug this whole feature was built around: a bulk import
+    that fails after the CardList is already created must not leave an
+    empty, sourceless list behind (see CLAUDE.md).
+    """
+    monkeypatch.setattr(cube_discover_service.cubecobra, "fetch_popular_cubes", lambda user_agent, **kw: [_entry("a")])
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.run_cube_discovery_sync(db)
+        cube = db.query(PopularCube).filter_by(external_id="a").one()
+
+        def _boom(url: str, user_agent: str) -> DeckFetchResult:
+            raise SourceFetchError("cubecobra unreachable")
+
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", _boom)
+
+        result = cube_discover_service.import_popular_cube(db, cube.id)
+
+        assert result.imported_list_id is None
+        assert result.import_error is not None
+        assert "cubecobra unreachable" in result.import_error
+        assert db.query(CardList).count() == 0  # no orphaned list left behind
+    finally:
+        db.close()
+
+
+def test_import_popular_cube_retry_after_failure_succeeds(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(cube_discover_service.cubecobra, "fetch_popular_cubes", lambda user_agent, **kw: [_entry("a")])
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.run_cube_discovery_sync(db)
+        cube = db.query(PopularCube).filter_by(external_id="a").one()
+
+        def _boom(url: str, user_agent: str) -> DeckFetchResult:
+            raise SourceFetchError("transient failure")
+
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", _boom)
+        failed = cube_discover_service.import_popular_cube(db, cube.id)
+        assert failed.import_error is not None
+
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result([("Sol Ring", 1)]))
+        retried = cube_discover_service.import_popular_cube(db, cube.id)
+
+        assert retried.import_error is None
+        assert retried.imported_list_id is not None
+    finally:
+        db.close()
+
+
+def test_import_popular_cube_raises_for_unknown_cube():
+    db = get_sessionmaker()()
+    try:
+        with pytest.raises(cube_discover_service.CubeNotFoundError):
+            cube_discover_service.import_popular_cube(db, 999999)
+    finally:
+        db.close()
+
+
+def test_import_popular_cube_adopts_existing_populated_same_name_list(monkeypatch: pytest.MonkeyPatch):
+    """Real live scenario: `card_lists` has a (user_id, name) uniqueness
+    constraint, and a cube already imported before this row-level tracking
+    existed (e.g. the pre-fix bulk "select all") has already claimed its
+    name - re-importing it must adopt that real, populated list instead of
+    crashing on the constraint.
+    """
+    monkeypatch.setattr(cube_discover_service.cubecobra, "fetch_popular_cubes", lambda user_agent, **kw: [_entry("a")])
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.run_cube_discovery_sync(db)
+        cube = db.query(PopularCube).filter_by(external_id="a").one()
+
+        pre_existing = list_service.create_list(db, name=cube.name, list_type="cube")
+        from app.models.lists import CardListItem
+
+        db.add(CardListItem(list_id=pre_existing.id, card_name="Sol Ring", quantity=1, section="mainboard"))
+        db.commit()
+
+        result = cube_discover_service.import_popular_cube(db, cube.id)
+
+        assert result.imported_list_id == pre_existing.id
+        assert result.import_error is None
+        assert db.query(CardList).count() == 1  # adopted, not duplicated
+    finally:
+        db.close()
+
+
+def test_import_popular_cube_replaces_existing_empty_same_name_list(monkeypatch: pytest.MonkeyPatch):
+    """An existing same-named list with zero items is the orphaned-list
+    bug itself, not a real prior import - it must be cleaned up and
+    re-attempted, not adopted as a false success.
+    """
+    monkeypatch.setattr(cube_discover_service.cubecobra, "fetch_popular_cubes", lambda user_agent, **kw: [_entry("a")])
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.run_cube_discovery_sync(db)
+        cube = db.query(PopularCube).filter_by(external_id="a").one()
+
+        orphan = list_service.create_list(db, name=cube.name, list_type="cube")
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result([("Sol Ring", 1)]))
+
+        result = cube_discover_service.import_popular_cube(db, cube.id)
+
+        assert result.imported_list_id is not None
+        assert result.imported_list_id != orphan.id  # the empty orphan was replaced, not reused directly
+        assert result.import_error is None
+        assert db.query(CardList).count() == 1  # old orphan gone, one real list remains
+    finally:
+        db.close()
+
+
+def test_import_popular_cube_does_not_cross_link_ambiguous_names(monkeypatch: pytest.MonkeyPatch):
+    """Real bug found live: two distinct real cubes can share an identical
+    display name (e.g. "Commander Cube" by 5 different owners). Importing
+    the second one must NOT adopt the first one's real list (that would
+    silently attribute one cube's content to a completely different
+    cube) - it gets its own, separately named list instead.
+    """
+    monkeypatch.setattr(
+        cube_discover_service.cubecobra,
+        "fetch_popular_cubes",
+        lambda user_agent, **kw: [_entry("a", name="Commander Cube"), _entry("b", name="Commander Cube")],
+    )
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.run_cube_discovery_sync(db)
+        cube_a = db.query(PopularCube).filter_by(external_id="a").one()
+        cube_b = db.query(PopularCube).filter_by(external_id="b").one()
+
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result([("Sol Ring", 1)]))
+
+        result_a = cube_discover_service.import_popular_cube(db, cube_a.id)
+        result_b = cube_discover_service.import_popular_cube(db, cube_b.id)
+
+        assert result_a.imported_list_id is not None
+        assert result_b.imported_list_id is not None
+        assert result_a.imported_list_id != result_b.imported_list_id  # two real lists, not one shared by both
+        assert db.query(CardList).count() == 2
+
+        list_a = db.get(CardList, result_a.imported_list_id)
+        list_b = db.get(CardList, result_b.imported_list_id)
+        assert list_a is not None and list_b is not None
+        assert list_a.name != list_b.name
     finally:
         db.close()

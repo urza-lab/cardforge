@@ -197,6 +197,32 @@ scryfall_resolution`, fixed with a functional index - a 450-card cube
 spanning far more distinct real sets than a typical deck was the first
 import in this project's history to actually hit that hard).
 
+**Server-side import tracking, robustness fixes, and a real 808-cube load
+test (post-Phase-7, user-requested).** `PopularCube` gained
+`imported_list_id`/`import_error`/`import_attempted_at` and a single
+backend endpoint (`POST /api/cube-discover/cubes/{id}/import`) that
+replaced the frontend's old 3-call client-orchestrated import - see
+ARCHITECTURE.md "Documented default decisions" for the snapshot/restore-
+across-resync and same-name-ambiguity design decisions this needed. Two
+real CubeCobra CSV export corruption patterns were found and fixed live
+(both traced to an unescaped quote character in a card's own free-text
+"Notes" field shifting later columns - see CLAUDE.md gotcha #34), plus a
+third, general (not CubeCobra-specific) fix in `confirm_import` itself
+that truncates any field too long for its column instead of crashing the
+whole import. Also added: real CubeCobra quality signals beyond
+`likeCount` - `numDecks` (real decks built from a cube) and
+`dateLastUpdated` - after checking what the real search response actually
+exposes (no comment count or star rating exists there). A real 808-cube
+sequential import load test (2026-08-12, explicitly to check for
+CubeCobra rate-limiting before running it) confirmed **zero real rate-
+limiting** across all 808 real fetches; every failure hit was either this
+project's own infrastructure (two brief nginx 502 bursts, both exactly
+coincident with a concurrent `docker compose up --build` during the test
+- not a real bug) or one of the real bugs above, all found specifically
+*because* a load test at this scale was the first thing big/varied enough
+to hit them (see CLAUDE.md gotcha #35 for a same-cube-name collision bug
+this also caught).
+
 **MTGJSON precon decks / "Best Coverage" (post-Phase-7, done,
 user-requested):** `app/source_adapters/mtgjson_precons.py` — a
 materially different kind of "discover a deck" source from every one

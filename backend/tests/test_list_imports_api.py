@@ -122,6 +122,32 @@ def test_csv_preview_confirm_flow_with_section_category_tags():
     assert commander["section"] == "commander"
 
 
+def test_confirm_truncates_overlong_set_code_instead_of_crashing():
+    """Real bug found live against a real CubeCobra export: an unescaped
+    quote inside one card's own name shifted that CSV row's later columns,
+    landing a 17-char artist name in the 16-char set_code slot. That used
+    to raise a raw Postgres StringDataRightTruncation and abort the whole
+    import's commit - confirm_import must truncate instead, so one
+    malformed row doesn't sink every other valid row in the same import.
+    """
+    list_id = _create_list("Overlong Set Code Test")
+    content = "Name,Qty,Set Code\nSol Ring,1,ThisSetCodeIsWayTooLongForTheColumn\n"
+
+    preview = client.post(
+        "/api/list-imports/preview",
+        data={"source_type": "csv", "list_id": str(list_id)},
+        files={"file": ("cube.csv", content.encode(), "text/csv")},
+    ).json()
+    assert preview["error_rows"] == 0
+
+    confirm = client.post(f"/api/list-imports/{preview['id']}/confirm", json={"skip_bad_rows": False})
+    assert confirm.status_code == 200
+
+    items = client.get(f"/api/lists/{list_id}/items").json()
+    assert len(items) == 1
+    assert items[0]["set_code"] == "THISSETCODEISWAY"  # normalized upper + truncated to 16 chars, not rejected
+
+
 def test_csv_preview_with_explicit_column_mapping():
     list_id = _create_list("CSV Mapping Test")
     content = "MyCard,MyQty\nBlack Lotus,1\n"

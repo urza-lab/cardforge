@@ -8,7 +8,7 @@
     "listsImport": "Listen importieren",
     "discover": "Decks entdecken",
     "edhrec": "EDHREC Commander",
-    "precons": "Beste Abdeckung",
+    "precons": "Preconstructed-Abdeckung",
     "discoverCubes": "Cubes entdecken",
     "comparisons": "Vergleiche",
     "sources": "Quellen",
@@ -122,7 +122,9 @@
     "types": { "deck": "Deck", "cube": "Cube" },
     "create": "Erstellen",
     "empty": "Noch keine Decks oder Cubes.",
-    "columns": { "name": "Name", "type": "Typ", "created": "Erstellt" },
+    "columns": { "name": "Name", "type": "Typ", "created": "Erstellt", "coverage": "Abdeckung" },
+    "filterType": "Anzeigen",
+    "filterAll": "Decks & Cubes",
     "bulkDelete_one": "{{count}} ausgewählte löschen",
     "bulkDelete_other": "{{count}} ausgewählte löschen",
     "bulkRefresh_one": "{{count}} ausgewählte aktualisieren",
@@ -295,8 +297,14 @@
     "syncing": "Synchronisiert…",
     "sortLikes": "Meiste Likes",
     "sortCards": "Meiste Karten",
+    "sortDecks": "Meiste gebaute Decks",
     "empty": "Noch keine populären Cubes zwischengespeichert — klicke oben auf \"Jetzt synchronisieren\".",
-    "columns": { "owner": "Besitzer", "cards": "Karten" }
+    "columns": { "owner": "Besitzer", "cards": "Karten", "decks": "Gebaute Decks", "cubeUpdated": "Cube aktualisiert", "lastUpdated": "Import versucht" },
+    "failedImports": "Fehlgeschlagene Importe",
+    "retry": "Erneut versuchen",
+    "retryAllFailed": "Alle fehlgeschlagenen erneut versuchen ({{count}})",
+    "retryingAll": "Versuche erneut {{done}} / {{total}}… {{eta}}",
+    "etaSeconds": "(noch ~{{seconds}}s)"
   },
   "pricesPage": {
     "mtgjson": {

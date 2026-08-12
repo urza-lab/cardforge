@@ -1,23 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { apiGet, apiPostJson, ApiError } from "../api/client";
 import type { CubeDiscoverySyncStatusRead, PopularCube } from "../types/cubecobra";
-import type { CardList, ListImportPreview, ListImportSummary } from "../types/lists";
 
 const POLL_INTERVAL_MS = 3000;
 
-type ImportState = "idle" | "importing" | "done" | "error";
-
-async function importCube(cube: PopularCube): Promise<{ listId: number } | { error: string }> {
+async function importCube(cubeId: number): Promise<PopularCube | { error: string }> {
   try {
-    const list = await apiPostJson<CardList>("/lists", { name: cube.name, list_type: "cube" });
-    const preview = await apiPostJson<ListImportPreview>("/list-imports/preview-url", {
-      list_id: list.id,
-      url: cube.source_url,
-    });
-    await apiPostJson<ListImportSummary>(`/list-imports/${preview.id}/confirm`, { skip_bad_rows: true });
-    return { listId: list.id };
+    return await apiPostJson<PopularCube>(`/cube-discover/cubes/${cubeId}/import`, {});
   } catch (err) {
     return { error: err instanceof ApiError ? err.message : String(err) };
   }
@@ -32,14 +23,23 @@ export default function DiscoverCubes() {
 
   const [cubes, setCubes] = useState<PopularCube[] | null>(null);
   const [cubesError, setCubesError] = useState<string | null>(null);
-  const [sort, setSort] = useState<"likes" | "cards">("likes");
+  const [sort, setSort] = useState<"likes" | "cards" | "decks">("likes");
 
-  const [importState, setImportState] = useState<Record<number, ImportState>>({});
-  const [importResult, setImportResult] = useState<Record<number, { listId: number } | { error: string }>>({});
+  // Only tracks "a request is in flight right now" - the actual outcome
+  // (imported_list_id / import_error) lives on the cube itself, returned
+  // by the import endpoint and merged back into `cubes`, so it survives a
+  // page reload or a later resync instead of resetting to "Import" every
+  // time the way purely client-side state did before (user-reported bug).
+  const [pending, setPending] = useState<Set<number>>(new Set());
 
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkRunning, setBulkRunning] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null);
+
+  const [retryAllRunning, setRetryAllRunning] = useState(false);
+  const [retryAllProgress, setRetryAllProgress] = useState<{ done: number; total: number; startedAt: number } | null>(
+    null,
+  );
 
   const fetchStatus = () => {
     apiGet<CubeDiscoverySyncStatusRead>("/cube-discover/cubes/status")
@@ -59,7 +59,7 @@ export default function DiscoverCubes() {
   useEffect(() => {
     setSelected((prev) => {
       if (!cubes) return prev;
-      const visible = new Set(cubes.map((c) => c.id));
+      const visible = new Set(cubes.filter((c) => !c.imported_list_id).map((c) => c.id));
       const next = new Set([...prev].filter((id) => visible.has(id)));
       return next.size === prev.size ? prev : next;
     });
@@ -88,15 +88,25 @@ export default function DiscoverCubes() {
     }
   }
 
-  async function handleImport(cube: PopularCube) {
-    setImportState((s) => ({ ...s, [cube.id]: "importing" }));
-    const result = await importCube(cube);
-    setImportState((s) => ({ ...s, [cube.id]: "error" in result ? "error" : "done" }));
-    setImportResult((r) => ({ ...r, [cube.id]: result }));
+  function applyResult(result: PopularCube | { error: string }) {
+    if ("error" in result) return; // the endpoint itself failed to respond at all (network/5xx) - nothing to merge
+    setCubes((prev) => (prev ? prev.map((c) => (c.id === result.id ? result : c)) : prev));
   }
 
-  const selectableCubes = (cubes ?? []).filter((c) => importState[c.id] !== "done");
-  const allSelectableSelected = selectableCubes.length > 0 && selectableCubes.every((c) => selected.has(c.id));
+  async function handleImport(cube: PopularCube) {
+    setPending((s) => new Set(s).add(cube.id));
+    const result = await importCube(cube.id);
+    applyResult(result);
+    setPending((s) => {
+      const next = new Set(s);
+      next.delete(cube.id);
+      return next;
+    });
+  }
+
+  const importableCubes = useMemo(() => (cubes ?? []).filter((c) => !c.imported_list_id), [cubes]);
+  const failedCubes = useMemo(() => (cubes ?? []).filter((c) => !c.imported_list_id && c.import_error), [cubes]);
+  const allSelectableSelected = importableCubes.length > 0 && importableCubes.every((c) => selected.has(c.id));
 
   function toggleOne(cubeId: number) {
     setSelected((prev) => {
@@ -108,26 +118,58 @@ export default function DiscoverCubes() {
   }
 
   function toggleAll() {
-    setSelected(allSelectableSelected ? new Set() : new Set(selectableCubes.map((c) => c.id)));
+    setSelected(allSelectableSelected ? new Set() : new Set(importableCubes.map((c) => c.id)));
   }
 
   async function handleBulkImport() {
-    const targets = (cubes ?? []).filter((c) => selected.has(c.id) && importState[c.id] !== "done");
+    const targets = importableCubes.filter((c) => selected.has(c.id));
     if (targets.length === 0) return;
 
     setBulkRunning(true);
     setBulkProgress({ done: 0, total: targets.length });
     for (let i = 0; i < targets.length; i++) {
       const cube = targets[i];
-      setImportState((s) => ({ ...s, [cube.id]: "importing" }));
-      const result = await importCube(cube);
-      setImportState((s) => ({ ...s, [cube.id]: "error" in result ? "error" : "done" }));
-      setImportResult((r) => ({ ...r, [cube.id]: result }));
+      setPending((s) => new Set(s).add(cube.id));
+      const result = await importCube(cube.id);
+      applyResult(result);
+      setPending((s) => {
+        const next = new Set(s);
+        next.delete(cube.id);
+        return next;
+      });
       setBulkProgress({ done: i + 1, total: targets.length });
     }
     setSelected(new Set());
     setBulkRunning(false);
   }
+
+  async function handleRetryAll() {
+    if (failedCubes.length === 0) return;
+    setRetryAllRunning(true);
+    setRetryAllProgress({ done: 0, total: failedCubes.length, startedAt: Date.now() });
+    for (let i = 0; i < failedCubes.length; i++) {
+      const cube = failedCubes[i];
+      setPending((s) => new Set(s).add(cube.id));
+      const result = await importCube(cube.id);
+      applyResult(result);
+      setPending((s) => {
+        const next = new Set(s);
+        next.delete(cube.id);
+        return next;
+      });
+      setRetryAllProgress((prev) => (prev ? { ...prev, done: i + 1 } : prev));
+    }
+    setRetryAllRunning(false);
+    setRetryAllProgress(null);
+  }
+
+  const retryAllEtaSeconds = (() => {
+    if (!retryAllProgress || retryAllProgress.done === 0) return null;
+    const elapsedMs = Date.now() - retryAllProgress.startedAt;
+    const perItemMs = elapsedMs / retryAllProgress.done;
+    const remaining = retryAllProgress.total - retryAllProgress.done;
+    return Math.round((perItemMs * remaining) / 1000);
+  })();
 
   const syncBadgeClass =
     status?.status === "CURRENT"
@@ -152,6 +194,12 @@ export default function DiscoverCubes() {
               <div className="cf-stat-value">{status.cube_count}</div>
               <div className="cf-stat-label">{t("discoverCubesPage.cachedCubes")}</div>
             </div>
+            {failedCubes.length > 0 && (
+              <div className="cf-stat">
+                <div className="cf-stat-value">{failedCubes.length}</div>
+                <div className="cf-stat-label">{t("discoverCubesPage.failedImports")}</div>
+              </div>
+            )}
           </div>
         )}
         {status?.status === "FAILED" && status.error_message && (
@@ -165,6 +213,20 @@ export default function DiscoverCubes() {
           >
             {status?.status === "FETCHING" ? t("discoverCubesPage.syncing") : t("discoverCubesPage.syncNow")}
           </button>
+          {failedCubes.length > 0 && (
+            <button className="cf-btn" disabled={retryAllRunning} onClick={handleRetryAll}>
+              {retryAllRunning
+                ? t("discoverCubesPage.retryingAll", {
+                    done: retryAllProgress?.done ?? 0,
+                    total: retryAllProgress?.total ?? 0,
+                    eta:
+                      retryAllEtaSeconds !== null
+                        ? t("discoverCubesPage.etaSeconds", { seconds: retryAllEtaSeconds })
+                        : "",
+                  })
+                : t("discoverCubesPage.retryAllFailed", { count: failedCubes.length })}
+            </button>
+          )}
         </div>
       </div>
 
@@ -172,9 +234,10 @@ export default function DiscoverCubes() {
         <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "flex-end", gap: 10 }}>
           <div>
             <label htmlFor="dc-sort">{t("discoverPage.sortBy")}</label>
-            <select id="dc-sort" className="cf-select" value={sort} onChange={(e) => setSort(e.target.value as "likes" | "cards")}>
+            <select id="dc-sort" className="cf-select" value={sort} onChange={(e) => setSort(e.target.value as "likes" | "cards" | "decks")}>
               <option value="likes">{t("discoverCubesPage.sortLikes")}</option>
               <option value="cards">{t("discoverCubesPage.sortCards")}</option>
+              <option value="decks">{t("discoverCubesPage.sortDecks")}</option>
             </select>
           </div>
         </div>
@@ -213,19 +276,21 @@ export default function DiscoverCubes() {
                     <th>{t("discoverCubesPage.columns.owner")}</th>
                     <th>{t("discoverCubesPage.columns.cards")}</th>
                     <th>{t("discoverPage.columns.likes")}</th>
+                    <th>{t("discoverCubesPage.columns.decks")}</th>
+                    <th>{t("discoverCubesPage.columns.cubeUpdated")}</th>
+                    <th>{t("discoverCubesPage.columns.lastUpdated")}</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {cubes.map((cube) => {
-                    const state = importState[cube.id] ?? "idle";
-                    const result = importResult[cube.id];
+                    const isPending = pending.has(cube.id);
                     return (
                       <tr key={cube.id}>
                         <td>
                           <input
                             type="checkbox"
-                            disabled={state === "done"}
+                            disabled={!!cube.imported_list_id}
                             checked={selected.has(cube.id)}
                             onChange={() => toggleOne(cube.id)}
                           />
@@ -238,18 +303,31 @@ export default function DiscoverCubes() {
                         <td>{cube.owner_username ?? "—"}</td>
                         <td>{cube.card_count}</td>
                         <td>{cube.like_count.toLocaleString()}</td>
+                        <td>{cube.num_decks !== null ? cube.num_decks.toLocaleString() : "—"}</td>
+                        <td>{cube.date_last_updated ? new Date(cube.date_last_updated).toLocaleDateString() : "—"}</td>
+                        <td>{cube.import_attempted_at ? new Date(cube.import_attempted_at).toLocaleString() : "—"}</td>
                         <td>
-                          {state === "done" && result && "listId" in result ? (
-                            <Link className="cf-btn" to={`/lists/${result.listId}`}>
+                          {cube.imported_list_id ? (
+                            <Link className="cf-btn" to={`/lists/${cube.imported_list_id}`}>
                               {t("discoverPage.viewList")}
                             </Link>
-                          ) : state === "error" ? (
-                            <span title={result && "error" in result ? result.error : ""} className="cf-badge cf-badge-error">
+                          ) : cube.import_error ? (
+                            <span title={cube.import_error} className="cf-badge cf-badge-error">
                               {t("discoverPage.importFailed")}
                             </span>
-                          ) : (
-                            <button className="cf-btn" disabled={state === "importing"} onClick={() => handleImport(cube)}>
-                              {state === "importing" ? t("common.loading") : t("discoverPage.import")}
+                          ) : null}
+                          {!cube.imported_list_id && (
+                            <button
+                              className="cf-btn"
+                              style={cube.import_error ? { marginLeft: 6 } : undefined}
+                              disabled={isPending}
+                              onClick={() => handleImport(cube)}
+                            >
+                              {isPending
+                                ? t("common.loading")
+                                : cube.import_error
+                                  ? t("discoverCubesPage.retry")
+                                  : t("discoverPage.import")}
                             </button>
                           )}
                         </td>
