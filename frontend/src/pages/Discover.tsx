@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { apiGet, apiPostJson, ApiError } from "../api/client";
@@ -33,10 +33,27 @@ export default function Discover() {
 
   const [decks, setDecks] = useState<PopularDeck[] | null>(null);
   const [decksError, setDecksError] = useState<string | null>(null);
-  const [sort, setSort] = useState<"views" | "likes">("views");
+  const [nameQuery, setNameQuery] = useState("");
+  const [sort, setSort] = useState<"views" | "likes" | "comments" | "bookmarks">("views");
   const [colorFilter, setColorFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState<"" | "moxfield" | "archidekt">("");
   const [bracketFilter, setBracketFilter] = useState("");
+  const [hasPrimerFilter, setHasPrimerFilter] = useState<"" | "true" | "false">("");
+  const [completeOnly, setCompleteOnly] = useState(false);
+  const [excludeTheorycrafted, setExcludeTheorycrafted] = useState(false);
+  const [updatedAfterDays, setUpdatedAfterDays] = useState("");
+  const [tagFilter, setTagFilter] = useState("");
+
+  // Archidekt has no stored commander metadata (confirmed live - its search
+  // API never returns one), only a real, working live `commanderName`
+  // filter - so this is its own submit-triggered (not debounced) mini-flow,
+  // fully separate from the local `q` search above, which already covers
+  // Moxfield's permanently-resolved commander_name for free.
+  const [archidektCommanderInput, setArchidektCommanderInput] = useState("");
+  const [archidektCommanderQuery, setArchidektCommanderQuery] = useState<string | null>(null);
+  const [archidektCommanderResults, setArchidektCommanderResults] = useState<PopularDeck[] | null>(null);
+  const [archidektCommanderLoading, setArchidektCommanderLoading] = useState(false);
+  const [archidektCommanderError, setArchidektCommanderError] = useState<string | null>(null);
 
   const [importState, setImportState] = useState<Record<number, ImportState>>({});
   const [importResult, setImportResult] = useState<Record<number, { listId: number } | { error: string }>>({});
@@ -55,15 +72,73 @@ export default function Discover() {
       .catch((err: unknown) => setStatusError(err instanceof ApiError ? err.message : String(err)));
   }, []);
 
+  // Debounced so typing in the name search doesn't fire a request per
+  // keystroke - the dropdown/text filters below fire immediately since
+  // those change far less often.
+  const [debouncedNameQuery, setDebouncedNameQuery] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedNameQuery(nameQuery.trim()), 300);
+    return () => clearTimeout(id);
+  }, [nameQuery]);
+
   const fetchDecks = useCallback(() => {
     const params = new URLSearchParams({ sort });
+    if (debouncedNameQuery) params.set("q", debouncedNameQuery);
     if (colorFilter.trim()) params.set("color_identity", colorFilter.trim().toUpperCase());
     if (sourceFilter) params.set("source", sourceFilter);
     if (bracketFilter) params.set("bracket", bracketFilter);
+    if (hasPrimerFilter) params.set("has_primer", hasPrimerFilter);
+    if (completeOnly) params.set("min_deck_size", "100");
+    if (excludeTheorycrafted) params.set("exclude_theorycrafted", "true");
+    if (updatedAfterDays) params.set("updated_after_days", updatedAfterDays);
+    if (tagFilter.trim()) params.set("tag", tagFilter.trim());
     apiGet<PopularDeck[]>(`/discover/decks?${params.toString()}`)
       .then(setDecks)
       .catch((err: unknown) => setDecksError(err instanceof ApiError ? err.message : String(err)));
-  }, [sort, colorFilter, sourceFilter, bracketFilter]);
+  }, [
+    sort,
+    debouncedNameQuery,
+    colorFilter,
+    sourceFilter,
+    bracketFilter,
+    hasPrimerFilter,
+    completeOnly,
+    excludeTheorycrafted,
+    updatedAfterDays,
+    tagFilter,
+  ]);
+
+  async function handleArchidektCommanderSearch(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const commander = archidektCommanderInput.trim();
+    if (!commander) return;
+    setArchidektCommanderLoading(true);
+    setArchidektCommanderError(null);
+    try {
+      const results = await apiGet<PopularDeck[]>(
+        `/discover/decks/archidekt-commander-search?commander=${encodeURIComponent(commander)}`
+      );
+      setArchidektCommanderResults(results);
+      setArchidektCommanderQuery(commander);
+    } catch (err) {
+      setArchidektCommanderError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setArchidektCommanderLoading(false);
+    }
+  }
+
+  function clearArchidektCommanderSearch() {
+    setArchidektCommanderQuery(null);
+    setArchidektCommanderResults(null);
+    setArchidektCommanderError(null);
+    setArchidektCommanderInput("");
+  }
+
+  // While an Archidekt commander search is active, it fully replaces the
+  // regular browse list (a live, differently-sourced result set) rather
+  // than merging with it - the existing filters/sort above still apply to
+  // normal browsing once cleared.
+  const displayedDecks = archidektCommanderQuery !== null ? archidektCommanderResults : decks;
 
   useEffect(fetchStatus, [fetchStatus]);
   useEffect(fetchDecks, [fetchDecks]);
@@ -80,15 +155,16 @@ export default function Discover() {
   }, []);
 
   useEffect(() => {
-    // The deck list just changed (new sort/filter, or a fresh sync) - drop
-    // any selection that no longer refers to a visible row.
+    // The deck list just changed (new sort/filter, a fresh sync, or an
+    // Archidekt commander search was run/cleared) - drop any selection that
+    // no longer refers to a visible row.
     setSelected((prev) => {
-      if (!decks) return prev;
-      const visible = new Set(decks.map((d) => d.id));
+      if (!displayedDecks) return prev;
+      const visible = new Set(displayedDecks.map((d) => d.id));
       const next = new Set([...prev].filter((id) => visible.has(id)));
       return next.size === prev.size ? prev : next;
     });
-  }, [decks]);
+  }, [displayedDecks]);
 
   useEffect(() => {
     if (status?.status !== "FETCHING") return;
@@ -127,6 +203,7 @@ export default function Discover() {
         price_profile_id: priceProfileId,
       });
       setDecks((prev) => (prev ? prev.map((d) => (d.id === priced.id ? priced : d)) : prev));
+      setArchidektCommanderResults((prev) => (prev ? prev.map((d) => (d.id === priced.id ? priced : d)) : prev));
       setPricingState((s) => {
         const next = { ...s };
         delete next[deck.id];
@@ -139,8 +216,8 @@ export default function Discover() {
   }
 
   const selectableDecks = useMemo(
-    () => (decks ?? []).filter((d) => importState[d.id] !== "done"),
-    [decks, importState]
+    () => (displayedDecks ?? []).filter((d) => importState[d.id] !== "done"),
+    [displayedDecks, importState]
   );
   const allSelectableSelected =
     selectableDecks.length > 0 && selectableDecks.every((d) => selected.has(d.id));
@@ -159,7 +236,7 @@ export default function Discover() {
   }
 
   async function handleBulkImport() {
-    const targets = (decks ?? []).filter((d) => selected.has(d.id) && importState[d.id] !== "done");
+    const targets = (displayedDecks ?? []).filter((d) => selected.has(d.id) && importState[d.id] !== "done");
     if (targets.length === 0) return;
 
     setBulkRunning(true);
@@ -221,6 +298,17 @@ export default function Discover() {
       <div className="cf-card">
         <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "flex-end", gap: 10 }}>
           <div>
+            <label htmlFor="disc-search">{t("discoverPage.searchName")}</label>
+            <input
+              id="disc-search"
+              className="cf-input"
+              style={{ width: 220 }}
+              value={nameQuery}
+              onChange={(e) => setNameQuery(e.target.value)}
+              placeholder={t("discoverPage.searchNamePlaceholder")}
+            />
+          </div>
+          <div>
             <label htmlFor="disc-source">{t("discoverPage.source")}</label>
             <select
               id="disc-source"
@@ -235,9 +323,16 @@ export default function Discover() {
           </div>
           <div>
             <label htmlFor="disc-sort">{t("discoverPage.sortBy")}</label>
-            <select id="disc-sort" className="cf-select" value={sort} onChange={(e) => setSort(e.target.value as "views" | "likes")}>
+            <select
+              id="disc-sort"
+              className="cf-select"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as "views" | "likes" | "comments" | "bookmarks")}
+            >
               <option value="views">{t("discoverPage.sortViews")}</option>
               <option value="likes">{t("discoverPage.sortLikes")}</option>
+              <option value="comments">{t("discoverPage.sortComments")}</option>
+              <option value="bookmarks">{t("discoverPage.sortBookmarks")}</option>
             </select>
           </div>
           <div>
@@ -262,14 +357,102 @@ export default function Discover() {
               <option value="5">5</option>
             </select>
           </div>
+          <div>
+            <label htmlFor="disc-primer">{t("discoverPage.hasPrimerFilter")}</label>
+            <select
+              id="disc-primer"
+              className="cf-select"
+              value={hasPrimerFilter}
+              onChange={(e) => setHasPrimerFilter(e.target.value as "" | "true" | "false")}
+            >
+              <option value="">{t("discoverPage.hasPrimerAny")}</option>
+              <option value="true">{t("discoverPage.hasPrimerYes")}</option>
+              <option value="false">{t("discoverPage.hasPrimerNo")}</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="disc-updated">{t("discoverPage.updatedFilter")}</label>
+            <select id="disc-updated" className="cf-select" value={updatedAfterDays} onChange={(e) => setUpdatedAfterDays(e.target.value)}>
+              <option value="">{t("discoverPage.updatedAny")}</option>
+              <option value="30">{t("discoverPage.updatedDays", { count: 30 })}</option>
+              <option value="90">{t("discoverPage.updatedDays", { count: 90 })}</option>
+              <option value="365">{t("discoverPage.updatedDays", { count: 365 })}</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="disc-tag">{t("discoverPage.tagFilter")}</label>
+            <input
+              id="disc-tag"
+              className="cf-input"
+              style={{ width: 130 }}
+              value={tagFilter}
+              onChange={(e) => setTagFilter(e.target.value)}
+              placeholder={t("discoverPage.tagPlaceholder")}
+            />
+          </div>
+        </div>
+        <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "center", gap: 16, marginTop: 8 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input type="checkbox" checked={completeOnly} onChange={(e) => setCompleteOnly(e.target.checked)} />
+            {t("discoverPage.completeOnly")}
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={excludeTheorycrafted}
+              onChange={(e) => setExcludeTheorycrafted(e.target.checked)}
+            />
+            {t("discoverPage.excludeTheorycrafted")}
+          </label>
         </div>
         {bracketFilter && <p style={{ fontSize: 12, color: "var(--cf-muted)" }}>{t("discoverPage.bracketHint")}</p>}
+        <p style={{ fontSize: 12, color: "var(--cf-muted)" }}>{t("discoverPage.searchHint")}</p>
+        {tagFilter && <p style={{ fontSize: 12, color: "var(--cf-muted)" }}>{t("discoverPage.tagHint")}</p>}
+
+        <form
+          onSubmit={handleArchidektCommanderSearch}
+          className="cf-form-row"
+          style={{ flexDirection: "row", alignItems: "flex-end", gap: 10, marginTop: 12 }}
+        >
+          <div>
+            <label htmlFor="disc-archidekt-commander">{t("discoverPage.archidektCommander.title")}</label>
+            <input
+              id="disc-archidekt-commander"
+              className="cf-input"
+              style={{ width: 220 }}
+              value={archidektCommanderInput}
+              onChange={(e) => setArchidektCommanderInput(e.target.value)}
+              placeholder={t("discoverPage.archidektCommander.placeholder")}
+            />
+          </div>
+          <button type="submit" className="cf-btn" disabled={archidektCommanderLoading || !archidektCommanderInput.trim()}>
+            {archidektCommanderLoading ? t("discoverPage.archidektCommander.searching") : t("discoverPage.archidektCommander.button")}
+          </button>
+          {archidektCommanderQuery !== null && (
+            <button type="button" className="cf-btn" onClick={clearArchidektCommanderSearch}>
+              {t("discoverPage.archidektCommander.clear")}
+            </button>
+          )}
+        </form>
+        {archidektCommanderError && <div className="cf-alert cf-alert-error">{archidektCommanderError}</div>}
+        {archidektCommanderQuery !== null && !archidektCommanderError && (
+          <p style={{ fontSize: 12, color: "var(--cf-muted)" }}>
+            {archidektCommanderResults && archidektCommanderResults.length > 0
+              ? t("discoverPage.archidektCommander.resultsHint", {
+                  count: archidektCommanderResults.length,
+                  commander: archidektCommanderQuery,
+                })
+              : t("discoverPage.archidektCommander.empty")}
+          </p>
+        )}
 
         {decksError && <div className="cf-alert cf-alert-error">{decksError}</div>}
-        {!decks && !decksError && <p>{t("common.loading")}</p>}
-        {decks && decks.length === 0 && <p>{t("discoverPage.empty")}</p>}
+        {!displayedDecks && !decksError && <p>{t("common.loading")}</p>}
+        {displayedDecks && displayedDecks.length === 0 && archidektCommanderQuery === null && (
+          <p>{t("discoverPage.empty")}</p>
+        )}
 
-        {decks && decks.length > 0 && (
+        {displayedDecks && displayedDecks.length > 0 && (
           <>
             <div className="cf-btn-row" style={{ alignItems: "center", gap: 10 }}>
               <button
@@ -296,10 +479,15 @@ export default function Discover() {
                       />
                     </th>
                     <th>{t("comparisonsPage.columns.name")}</th>
+                    <th>{t("discoverPage.columns.commander")}</th>
                     <th>{t("discoverPage.columns.source")}</th>
                     <th>{t("discoverPage.columns.author")}</th>
                     <th>{t("discoverPage.columns.colors")}</th>
                     <th>{t("discoverPage.columns.bracket")}</th>
+                    <th>{t("discoverPage.columns.primer")}</th>
+                    <th>{t("discoverPage.columns.size")}</th>
+                    <th>{t("discoverPage.columns.updated")}</th>
+                    <th>{t("discoverPage.columns.tags")}</th>
                     <th>{t("discoverPage.columns.views")}</th>
                     <th>{t("discoverPage.columns.likes")}</th>
                     <th>{t("discoverPage.columns.price")}</th>
@@ -307,7 +495,7 @@ export default function Discover() {
                   </tr>
                 </thead>
                 <tbody>
-                  {decks.map((deck) => {
+                  {displayedDecks.map((deck) => {
                     const state = importState[deck.id] ?? "idle";
                     const result = importResult[deck.id];
                     return (
@@ -325,10 +513,22 @@ export default function Discover() {
                             {deck.name}
                           </a>
                         </td>
+                        <td>
+                          {deck.commander_name ?? "—"}
+                          {deck.theorycrafted && (
+                            <span className="cf-badge cf-badge-warn" style={{ marginLeft: 6 }}>
+                              {t("discoverPage.theorycraftedBadge")}
+                            </span>
+                          )}
+                        </td>
                         <td>{t(`discoverPage.source${deck.source === "archidekt" ? "Archidekt" : "Moxfield"}`)}</td>
                         <td>{deck.author ?? "—"}</td>
                         <td>{deck.color_identity && deck.color_identity.length > 0 ? deck.color_identity.join("") : "—"}</td>
                         <td>{deck.bracket ?? "—"}</td>
+                        <td>{deck.has_primer ? t("common.yes") : "—"}</td>
+                        <td>{deck.deck_size ?? "—"}</td>
+                        <td>{deck.deck_updated_at ? new Date(deck.deck_updated_at).toLocaleDateString() : "—"}</td>
+                        <td>{deck.tags && deck.tags.length > 0 ? deck.tags.join(", ") : "—"}</td>
                         <td>{deck.view_count.toLocaleString()}</td>
                         <td>{deck.like_count > 0 ? deck.like_count.toLocaleString() : "—"}</td>
                         <td>

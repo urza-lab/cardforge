@@ -19,11 +19,47 @@ def list_popular_decks(
     color_identity: str | None = None,
     source: str | None = None,
     bracket: int | None = None,
+    q: str | None = None,
+    has_primer: bool | None = None,
+    min_deck_size: int | None = None,
+    exclude_theorycrafted: bool = False,
+    updated_after_days: int | None = None,
+    tag: str | None = None,
     db: Session = Depends(get_db),
 ) -> list[PopularDeckRead]:
     decks = discover_service.list_popular_decks(
-        db, sort=sort, color_identity=color_identity, source=source, bracket=bracket
+        db,
+        sort=sort,
+        color_identity=color_identity,
+        source=source,
+        bracket=bracket,
+        q=q,
+        has_primer=has_primer,
+        min_deck_size=min_deck_size,
+        exclude_theorycrafted=exclude_theorycrafted,
+        updated_after_days=updated_after_days,
+        tag=tag,
     )
+    return [PopularDeckRead.model_validate(d) for d in decks]
+
+
+@router.get("/decks/archidekt-commander-search", response_model=list[PopularDeckRead])
+def search_archidekt_commander(commander: str, db: Session = Depends(get_db)) -> list[PopularDeckRead]:
+    """Live, on-demand proxy to Archidekt's real `commanderName` search
+    filter - see app.services.discover_service.search_archidekt_by_commander
+    and app.source_adapters.archidekt.search_by_commander for why this can't
+    be a local cache lookup the way Moxfield's commander search is. Only
+    ever called on an explicit submit action from the frontend (Enter/
+    button, not per keystroke) - deliberately not folded into the regular
+    /decks endpoint's `q` filter, since that stays a fast, always-local
+    query with no live third-party dependency.
+    """
+    if not commander.strip():
+        return []
+    try:
+        decks = discover_service.search_archidekt_by_commander(db, commander.strip())
+    except SourceFetchError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     return [PopularDeckRead.model_validate(d) for d in decks]
 
 

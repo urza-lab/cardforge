@@ -163,3 +163,58 @@ def test_fetch_popular_decks_raises_on_non_200(monkeypatch: pytest.MonkeyPatch):
     )
     with pytest.raises(SourceFetchError):
         archidekt.fetch_popular_decks("test-agent")
+
+
+def test_fetch_popular_decks_extracts_new_real_fields(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(archidekt.time, "sleep", lambda *_: None)
+    real_deck = {
+        "id": 111, "name": "Real Deck", "owner": {"username": "Alice"},
+        "viewCount": 5000, "colors": {"W": 10, "U": 20, "B": 0, "R": 0, "G": 0},
+        "hasPrimer": True, "size": 100, "theorycrafted": False, "comments": 7,
+        "updatedAt": "2024-04-22T22:51:34.313209Z", "tags": ["Competitive"],
+    }
+    calls = {"n": 0}
+
+    def fake_get(url: str, params: dict[str, object], headers: dict[str, str], timeout: float) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _search_response([real_deck])
+        return _search_response([])
+
+    monkeypatch.setattr(archidekt.httpx, "get", fake_get)
+
+    decks = archidekt.fetch_popular_decks("test-agent")
+
+    assert len(decks) == 1
+    d = decks[0]
+    assert d.has_primer is True
+    assert d.deck_size == 100
+    assert d.theorycrafted is False
+    assert d.comment_count == 7
+    assert d.deck_updated_at is not None
+    assert d.tags == ["Competitive"]
+
+
+def test_search_by_commander_returns_matching_external_ids(monkeypatch: pytest.MonkeyPatch):
+    captured = {}
+
+    def fake_get(url: str, params: dict[str, object], headers: dict[str, str], timeout: float) -> httpx.Response:
+        captured["params"] = params
+        return _search_response([{"id": 111, "name": "Winota Deck"}, {"id": 222, "name": "Another Winota"}])
+
+    monkeypatch.setattr(archidekt.httpx, "get", fake_get)
+
+    ids = archidekt.search_by_commander("Winota, Joiner of Forces", "test-agent")
+
+    assert ids == {"111", "222"}
+    assert captured["params"]["commanderName"] == "Winota, Joiner of Forces"
+
+
+def test_search_by_commander_raises_on_non_200(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        archidekt.httpx,
+        "get",
+        lambda url, params, headers, timeout: httpx.Response(500, request=httpx.Request("GET", url)),
+    )
+    with pytest.raises(SourceFetchError):
+        archidekt.search_by_commander("Anything", "test-agent")

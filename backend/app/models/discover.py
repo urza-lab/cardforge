@@ -77,6 +77,54 @@ class PopularDeck(Base):
     unpriced_missing_count: Mapped[int | None] = mapped_column(Integer)
     priced_at: Mapped[datetime | None] = mapped_column()
 
+    # Real, free fields user-requested after real search-API field lists
+    # were inspected live (see CLAUDE.md) - all populated straight from
+    # each source's own search response except commander_name (Moxfield
+    # only, resolved separately - see MoxfieldCommanderCache below;
+    # Archidekt's search API never returns a commander field at all, only
+    # a live, query-time `commanderName` search filter with no way to
+    # cache it as stored metadata).
+    commander_name: Mapped[str | None] = mapped_column(String(256))
+    has_primer: Mapped[bool] = mapped_column(default=False)
+    deck_size: Mapped[int | None] = mapped_column(Integer)
+    # None = source has no such concept (Moxfield); True/False = Archidekt's
+    # real signal for "never actually built/played."
+    theorycrafted: Mapped[bool | None] = mapped_column()
+    comment_count: Mapped[int] = mapped_column(Integer, default=0)
+    # Moxfield only - Archidekt's search API has no equivalent field.
+    bookmark_count: Mapped[int | None] = mapped_column(Integer)
+    # The deck's own last-edited time (source-reported), not this row's
+    # own `synced_at` - lets a real "actively maintained" filter exist
+    # independent of when CardForge itself last synced.
+    deck_updated_at: Mapped[datetime | None] = mapped_column()
+    # Moxfield's hubNames / Archidekt's tags - free-form, source-defined
+    # taxonomy that differs completely between the two (not normalized).
+    tags: Mapped[list[str] | None] = mapped_column(JSONB)
+
+
+class MoxfieldCommanderCache(Base):
+    """mainCardId -> resolved card name, for `PopularDeck.commander_name`
+    (Moxfield only - see its own column comment). A real card's name never
+    changes, so this is a permanent cache, not a per-sync scratch table:
+    once an ID is resolved here, `discover_service.run_discovery_sync`
+    never pays for it again on a later resync, only for genuinely new
+    commanders (see app.source_adapters.moxfield.resolve_commander_names).
+    Confirmed live: resolving Moxfield's real `mainCardId` per unique
+    commander across the full ~6,300-deck real cache is itself a real,
+    non-trivial cost (~1.7h one-time, at the existing 1.5s per-request
+    pacing that already protects this project from Moxfield's real
+    rate-limiting - see gotcha #23) precisely because there is no bulk
+    lookup endpoint, only a real, working per-ID one
+    (`GET /v1/cards/{id}`) - this table is what keeps that a one-time
+    cost instead of a recurring one.
+    """
+
+    __tablename__ = "moxfield_commander_cache"
+
+    main_card_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(256))
+    resolved_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
 
 class DeckDiscoverySyncState(Base):
     __tablename__ = "deck_discovery_sync_state"

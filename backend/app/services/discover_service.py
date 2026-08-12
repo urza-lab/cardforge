@@ -7,7 +7,8 @@ app/models/discover.py for why this is a cache, not a live query.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import delete, func, insert, select
@@ -20,6 +21,7 @@ from app.models.discover import (
     DISCOVERY_SYNC_STATE_ID,
     DeckDiscoverySyncState,
     DeckDiscoverySyncStatus,
+    MoxfieldCommanderCache,
     PopularDeck,
 )
 from app.services import pricing_service, scryfall_resolution
@@ -68,20 +70,21 @@ def trigger_sync(db: Session) -> DeckDiscoverySyncState:
     # scryfall_service.trigger_sync for the same pattern).
     from app.workers.jobs import sync_popular_decks
 
-    # 1800s: the original 900s estimate (Moxfield ~150s + Archidekt ~100s,
-    # from each adapter's per-request pacing constant times its page count)
-    # turned out wrong live - a real sync at the current pool sizes
-    # (Moxfield 50 pages/sort, Archidekt 200 pages) hit the 900s ceiling and
-    # got killed by RQ's JobTimeoutException with *nothing* committed (the
-    # delete-then-reinsert per source only commits once that source's whole
-    # fetch_popular_decks() call returns), even though isolated timing
-    # samples of both APIs during the same investigation showed nowhere
-    # near that per-request. Root cause wasn't nailed down (sustained-load
-    # server-side slowdown neither adapter's short isolated probe would
-    # trigger is the leading theory) - doubled the timeout to a value with
-    # real headroom over what was actually observed, rather than re-guessing
-    # a "should be enough" number a second time.
-    get_queue("default").enqueue(sync_popular_decks, job_timeout=1800)
+    # 1800s -> 14400s (4h): the original 900s estimate (Moxfield ~150s +
+    # Archidekt ~100s, from each adapter's per-request pacing constant times
+    # its page count) turned out wrong live once - a real sync hit the 900s
+    # ceiling and got killed by RQ's JobTimeoutException with *nothing*
+    # committed, doubled to 1800s at the time. Bumped again, further out of
+    # proportion with normal deck-fetch time, because Moxfield commander
+    # resolution (_resolve_moxfield_commanders, user-requested) now runs in
+    # the same job: a *first* full resolution across this project's real
+    # ~6,300-deck Moxfield cache is itself ~1.7h (confirmed via live
+    # sampling - no bulk lookup endpoint exists, only a paced per-ID one).
+    # This is a one-time cost (app.models.discover.MoxfieldCommanderCache
+    # makes every later sync only pay for genuinely new commanders), so a
+    # generous ceiling here costs nothing once the cache is warm - no need
+    # to shrink it back down later.
+    get_queue("default").enqueue(sync_popular_decks, job_timeout=14400)
     state.status = DeckDiscoverySyncStatus.fetching.value
     state.started_at = datetime.now(UTC)
     state.error_message = None
@@ -110,13 +113,25 @@ def run_discovery_sync(db: Session, settings: Settings | None = None) -> DeckDis
     state.error_message = None
     db.commit()
 
+    # Kept separate from `warnings` below: only a source's own fetch failing
+    # counts toward "every source failed" (FAILED status) - a commander-
+    # resolution hiccup is real to report, but Moxfield's deck data itself
+    # still landed fine, so it must not make an otherwise-successful sync
+    # look like a total outage.
     errors: list[str] = []
+    warnings: list[str] = []
     for source_name, fetch_fn in _SOURCES:
         try:
             decks = fetch_fn(settings.scryfall_user_agent)
         except Exception as exc:  # noqa: BLE001 - one source's failure must not abort the others
             errors.append(f"{source_name}: {exc}")
             continue
+
+        if source_name == "moxfield":
+            try:
+                decks = _resolve_moxfield_commanders(db, decks, settings.scryfall_user_agent)
+            except Exception as exc:  # noqa: BLE001 - commander names are an enrichment, not core sync data
+                warnings.append(f"moxfield commander resolution: {exc}")
 
         db.execute(delete(PopularDeck).where(PopularDeck.source == source_name))
         if decks:
@@ -134,6 +149,14 @@ def run_discovery_sync(db: Session, settings: Settings | None = None) -> DeckDis
                         "like_count": d.like_count,
                         "color_identity": d.color_identity,
                         "bracket": d.bracket,
+                        "commander_name": d.commander_name,
+                        "has_primer": d.has_primer,
+                        "deck_size": d.deck_size,
+                        "theorycrafted": d.theorycrafted,
+                        "comment_count": d.comment_count,
+                        "bookmark_count": d.bookmark_count,
+                        "deck_updated_at": d.deck_updated_at,
+                        "tags": d.tags,
                     }
                     for d in decks
                 ],
@@ -141,13 +164,14 @@ def run_discovery_sync(db: Session, settings: Settings | None = None) -> DeckDis
         db.commit()
 
     total = db.scalar(select(func.count()).select_from(PopularDeck))
+    all_messages = errors + warnings
 
     if errors and len(errors) == len(_SOURCES):
         state.status = DeckDiscoverySyncStatus.failed.value
-        state.error_message = "; ".join(errors)[:1024]
+        state.error_message = "; ".join(all_messages)[:1024]
     else:
         state.status = DeckDiscoverySyncStatus.current.value
-        state.error_message = "; ".join(errors)[:1024] if errors else None
+        state.error_message = "; ".join(all_messages)[:1024] if all_messages else None
     state.deck_count = total or 0
     state.finished_at = datetime.now(UTC)
     db.commit()
@@ -158,6 +182,69 @@ def run_discovery_sync(db: Session, settings: Settings | None = None) -> DeckDis
     return state
 
 
+_COMMANDER_CACHE_FLUSH_EVERY = 25
+
+
+def _resolve_moxfield_commanders(
+    db: Session, decks: list[PopularDeckEntry], user_agent: str
+) -> list[PopularDeckEntry]:
+    """Fills in `commander_name` on every Moxfield entry that has a
+    `main_card_id`, using MoxfieldCommanderCache for already-known names and
+    moxfield.iter_resolved_commander_names for the rest (paced, potentially
+    slow the first time - see that function's own docstring). Commits the
+    cache periodically (not just at the end) so a mid-run crash or worker
+    restart - see CLAUDE.md gotcha #29, a real, routine occurrence during
+    dev, not hypothetical - only loses the current partial batch, not every
+    resolution made so far in this run.
+    """
+    known: dict[str, str] = {
+        row.main_card_id: row.name
+        for row in db.execute(select(MoxfieldCommanderCache.main_card_id, MoxfieldCommanderCache.name))
+    }
+    main_card_ids = {d.main_card_id for d in decks if d.main_card_id}
+
+    newly_resolved: dict[str, str] = {}
+    for i, (main_card_id, name) in enumerate(
+        moxfield.iter_resolved_commander_names(main_card_ids, user_agent, known=known), start=1
+    ):
+        newly_resolved[main_card_id] = name
+        db.add(MoxfieldCommanderCache(main_card_id=main_card_id, name=name))
+        if i % _COMMANDER_CACHE_FLUSH_EVERY == 0:
+            db.commit()
+    db.commit()
+
+    known.update(newly_resolved)
+    return [replace(d, commander_name=known.get(d.main_card_id)) if d.main_card_id else d for d in decks]
+
+
+def search_archidekt_by_commander(db: Session, commander_name: str, settings: Settings | None = None) -> list[PopularDeck]:
+    """Live, on-demand proxy to Archidekt's real `commanderName` search
+    filter (see archidekt.search_by_commander for why this can't be a local
+    cache lookup like Moxfield's - Archidekt's search API never returns a
+    commander field, only accepts one as a filter). Only ever called on an
+    explicit user action (Enter/submit, not on every keystroke - see
+    app/api/discover.py), never from the regular sync, to avoid hitting
+    Archidekt live on casual browsing.
+
+    Returns already-cached PopularDeck rows whose external_id matched the
+    live search - a deck Archidekt returns but this project hasn't synced
+    yet is silently not included (no partial/uncached row is fabricated),
+    matching "no fake success": every returned row has real, complete local
+    metadata (color identity, bracket, price if already computed), not a
+    thin live-only stub.
+    """
+    settings = settings or get_settings()
+    matched_ids = archidekt.search_by_commander(commander_name, settings.scryfall_user_agent)
+    if not matched_ids:
+        return []
+    stmt = (
+        select(PopularDeck)
+        .where(PopularDeck.source == "archidekt", PopularDeck.external_id.in_(matched_ids))
+        .order_by(PopularDeck.view_count.desc())
+    )
+    return list(db.scalars(stmt))
+
+
 def list_popular_decks(
     db: Session,
     *,
@@ -165,6 +252,12 @@ def list_popular_decks(
     color_identity: str | None = None,
     source: str | None = None,
     bracket: int | None = None,
+    q: str | None = None,
+    has_primer: bool | None = None,
+    min_deck_size: int | None = None,
+    exclude_theorycrafted: bool = False,
+    updated_after_days: int | None = None,
+    tag: str | None = None,
 ) -> list[PopularDeck]:
     """`color_identity`, when given, is a set of WUBRG letters (e.g. "WU")
     - only decks whose own color identity is a subset of it are returned
@@ -181,13 +274,40 @@ def list_popular_decks(
     have no bracket at all and are excluded when this filter is active,
     same "omit rather than fabricate" reasoning as everywhere else real
     data might just not exist for a given row.
+    `q`, when given, is a case-insensitive substring match against the deck
+    *name* OR the (Moxfield-only, separately resolved) `commander_name` -
+    see app.source_adapters.moxfield.resolve_commander_names and
+    MoxfieldCommanderCache for why only Moxfield has a real, permanently
+    stored commander name; Archidekt commander search is a separate live
+    query (search_archidekt_by_commander below), not part of this function.
+    `has_primer`, `min_deck_size`, `updated_after_days`, and `tag` filter
+    against real fields both sources' search APIs already return (verified
+    live - see CLAUDE.md). `exclude_theorycrafted` drops Archidekt decks
+    real-flagged as never actually built/played (Moxfield has no such
+    concept, so its rows are never excluded by this filter regardless).
     """
-    order_column = PopularDeck.like_count if sort == "likes" else PopularDeck.view_count
+    order_column = {"likes": PopularDeck.like_count, "comments": PopularDeck.comment_count, "bookmarks": PopularDeck.bookmark_count}.get(
+        sort, PopularDeck.view_count
+    )
     stmt = select(PopularDeck).order_by(order_column.desc())
     if source:
         stmt = stmt.where(PopularDeck.source == source)
     if bracket is not None:
         stmt = stmt.where(PopularDeck.bracket == bracket)
+    if q and q.strip():
+        needle = f"%{q.strip()}%"
+        stmt = stmt.where(PopularDeck.name.ilike(needle) | PopularDeck.commander_name.ilike(needle))
+    if has_primer is not None:
+        stmt = stmt.where(PopularDeck.has_primer == has_primer)
+    if min_deck_size is not None:
+        stmt = stmt.where(PopularDeck.deck_size >= min_deck_size)
+    if exclude_theorycrafted:
+        stmt = stmt.where(PopularDeck.theorycrafted.is_not(True))
+    if updated_after_days is not None:
+        cutoff = datetime.now(UTC) - timedelta(days=updated_after_days)
+        stmt = stmt.where(PopularDeck.deck_updated_at >= cutoff)
+    if tag and tag.strip():
+        stmt = stmt.where(PopularDeck.tags.contains([tag.strip()]))
     decks = list(db.scalars(stmt))
 
     if color_identity:

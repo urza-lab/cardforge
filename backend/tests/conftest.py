@@ -66,6 +66,11 @@ def _clean_db():
         db.execute(text("DELETE FROM card_lists"))
         db.execute(text("DELETE FROM price_profiles"))
         db.execute(text("DELETE FROM popular_decks"))
+        # Deliberately deleted here even though it's a *permanent* cache in
+        # production (a card's name never changes, so a real resync should
+        # never re-pay for an already-resolved commander) - tests still need
+        # isolation from each other, same as every other table here.
+        db.execute(text("DELETE FROM moxfield_commander_cache"))
         db.execute(text("DELETE FROM edhrec_synthesized_decks"))
         db.execute(text("DELETE FROM popular_cubes"))
         db.execute(text("DELETE FROM precon_decks"))

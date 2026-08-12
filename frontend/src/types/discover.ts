@@ -25,4 +25,12 @@ export interface PopularDeck {
   missing_cost_currency: string | null;
   unpriced_missing_count: number | null;
   priced_at: string | null;
+  commander_name: string | null;
+  has_primer: boolean;
+  deck_size: number | null;
+  theorycrafted: boolean | null;
+  comment_count: number;
+  bookmark_count: number | null;
+  deck_updated_at: string | null;
+  tags: string[] | null;
 }

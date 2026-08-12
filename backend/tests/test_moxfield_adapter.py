@@ -169,3 +169,72 @@ def test_fetch_popular_decks_raises_on_non_200(monkeypatch: pytest.MonkeyPatch):
     )
     with pytest.raises(SourceFetchError):
         moxfield.fetch_popular_decks("test-agent")
+
+
+def test_fetch_popular_decks_extracts_new_real_fields(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(moxfield.time, "sleep", lambda *_: None)
+    entry = {
+        "publicId": "d1", "name": "Deck", "createdByUser": {"displayName": "Alice"},
+        "publicUrl": "https://moxfield.com/decks/d1", "format": "commander",
+        "viewCount": 1, "likeCount": 1, "colorIdentity": ["W"],
+        "hasPrimer": True, "mainboardCount": 100, "commentCount": 12, "bookmarkCount": 3,
+        "lastUpdatedAtUtc": "2026-03-15T09:21:30.92Z", "hubNames": ["Competitive"], "mainCardId": "E5bmd",
+    }
+    monkeypatch.setattr(moxfield.httpx, "get", lambda *a, **k: _search_response([entry]))
+
+    decks = moxfield.fetch_popular_decks("test-agent")
+
+    assert len(decks) == 1
+    d = decks[0]
+    assert d.has_primer is True
+    assert d.deck_size == 100
+    assert d.comment_count == 12
+    assert d.bookmark_count == 3
+    assert d.deck_updated_at is not None
+    assert d.tags == ["Competitive"]
+    assert d.main_card_id == "E5bmd"
+    assert d.commander_name is None  # resolved separately, not by fetch_popular_decks itself
+
+
+def _card_response(card_id: str, name: str | None, status_code: int = 200) -> httpx.Response:
+    request = httpx.Request("GET", f"{moxfield.COMMANDER_LOOKUP_API}/{card_id}")
+    if name is None:
+        return httpx.Response(status_code, request=request)
+    return httpx.Response(200, content=json.dumps({"card": {"id": card_id, "name": name}}), request=request)
+
+
+def test_iter_resolved_commander_names_resolves_real_ids(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(moxfield.time, "sleep", lambda *_: None)
+    names = {"E5bmd": "Winota, Joiner of Forces", "E1RzR": "Najeela, the Blade-Blossom"}
+
+    def fake_get(url: str, headers: dict[str, str], timeout: float) -> httpx.Response:
+        card_id = url.rsplit("/", 1)[-1]
+        return _card_response(card_id, names.get(card_id))
+
+    monkeypatch.setattr(moxfield.httpx, "get", fake_get)
+
+    resolved = dict(moxfield.iter_resolved_commander_names({"E5bmd", "E1RzR"}, "test-agent"))
+    assert resolved == names
+
+
+def test_iter_resolved_commander_names_skips_known_and_bad_ids(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(moxfield.time, "sleep", lambda *_: None)
+    calls: list[str] = []
+
+    def fake_get(url: str, headers: dict[str, str], timeout: float) -> httpx.Response:
+        card_id = url.rsplit("/", 1)[-1]
+        calls.append(card_id)
+        if card_id == "BADID":
+            return _card_response(card_id, None, status_code=404)
+        return _card_response(card_id, "Some Commander")
+
+    monkeypatch.setattr(moxfield.httpx, "get", fake_get)
+
+    resolved = dict(
+        moxfield.iter_resolved_commander_names(
+            {"KNOWN", "BADID", "NEW1"}, "test-agent", known={"KNOWN": "Already Cached"}
+        )
+    )
+
+    assert "KNOWN" not in calls  # already known - never fetched
+    assert resolved == {"NEW1": "Some Commander"}  # BADID's 404 is skipped, not raised

@@ -8,6 +8,7 @@ standalone type.
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -194,6 +195,50 @@ def fetch_popular_decks(user_agent: str, *, fmt: int = COMMANDER_FORMAT_ID) -> l
                 like_count=0,
                 color_identity=color_identity,
                 bracket=entry.get("edhBracket"),
+                has_primer=bool(entry.get("hasPrimer", False)),
+                deck_size=entry.get("size"),
+                theorycrafted=entry.get("theorycrafted"),
+                comment_count=entry.get("comments") or 0,
+                deck_updated_at=_parse_archidekt_timestamp(entry.get("updatedAt")),
+                tags=entry.get("tags") or None,
             )
 
     return list(by_id.values())
+
+
+def _parse_archidekt_timestamp(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def search_by_commander(commander_name: str, user_agent: str, *, fmt: int = COMMANDER_FORMAT_ID) -> set[str]:
+    """Live, on-demand query against Archidekt's real `commanderName` search
+    filter (confirmed live: unlike every other guessed param name here,
+    this one genuinely changes the result set - a nonsense value returns
+    zero results, real commander names return real matching decks). No
+    stored metadata exists to search locally instead (Archidekt's search
+    response never includes a commander field at all, confirmed by
+    inspecting the full raw row shape), so this is only ever called on an
+    explicit user action (submit/Enter, not on every keystroke - see
+    app/api/discover.py), never as part of the regular cached sync.
+
+    Returns the set of matching `external_id`s only, not full deck data -
+    the caller (discover_service) intersects this against the already-
+    cached Archidekt rows so color/bracket/price data stays sourced from
+    the local cache, not this one-off live response.
+    """
+    headers = {"User-Agent": user_agent, "Accept": "application/json"}
+    resp = httpx.get(
+        SEARCH_API,
+        params={"formats": fmt, "orderBy": "-viewCount", "commanderName": commander_name},
+        headers=headers,
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        raise SourceFetchError(f"Archidekt commander search returned HTTP {resp.status_code}")
+    results = resp.json().get("results", [])
+    return {str(entry["id"]) for entry in results if entry.get("id") is not None}

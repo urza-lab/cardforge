@@ -40,3 +40,11 @@ class PopularDeckRead(BaseModel):
     missing_cost_currency: str | None
     unpriced_missing_count: int | None
     priced_at: datetime | None
+    commander_name: str | None
+    has_primer: bool
+    deck_size: int | None
+    theorycrafted: bool | None
+    comment_count: int
+    bookmark_count: int | None
+    deck_updated_at: datetime | None
+    tags: list[str] | None

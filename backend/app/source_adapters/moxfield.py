@@ -13,6 +13,8 @@ shape to build CardListItem rows from, whichever adapter produced it.
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
+from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
 
@@ -45,6 +47,15 @@ POPULAR_DECKS_SORTS = ("views", "likes")
 # requests back-to-back with no pacing at all - a small delay between each
 # of this sync's few requests keeps it respectful of Moxfield's servers.
 POPULAR_DECKS_REQUEST_DELAY_SECONDS = 1.5
+
+# Real, working per-ID card lookup (confirmed live: "E5bmd" ->
+# "Winota, Joiner of Forces") - the only way to get a real commander name at
+# all, since Moxfield's search API has no working commander-name filter of
+# its own (confirmed live: guessed query param names were silently ignored,
+# proven via a nonsense-value control request returning identical results).
+# No bulk/batch variant was found, so this is paced the same as everything
+# else here - see resolve_commander_names.
+COMMANDER_LOOKUP_API = "https://api.moxfield.com/v1/cards"
 
 # Moxfield's own top-level board buckets map directly to our section enum
 # (app.models.lists.ListItemSection) except "commanders"/"companions" -
@@ -177,6 +188,68 @@ def fetch_popular_decks(user_agent: str, *, fmt: str = "commander") -> list[Popu
                     view_count=entry.get("viewCount") or 0,
                     like_count=entry.get("likeCount") or 0,
                     color_identity=entry.get("colorIdentity"),
+                    has_primer=bool(entry.get("hasPrimer", False)),
+                    deck_size=entry.get("mainboardCount"),
+                    comment_count=entry.get("commentCount") or 0,
+                    bookmark_count=entry.get("bookmarkCount") or 0,
+                    deck_updated_at=_parse_moxfield_timestamp(entry.get("lastUpdatedAtUtc")),
+                    tags=entry.get("hubNames") or None,
+                    main_card_id=entry.get("mainCardId"),
                 )
 
     return list(by_id.values())
+
+
+def _parse_moxfield_timestamp(raw: str | None) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+
+
+def iter_resolved_commander_names(
+    main_card_ids: set[str], user_agent: str, *, known: dict[str, str] | None = None
+) -> Iterator[tuple[str, str]]:
+    """Resolves each Moxfield-internal `mainCardId` to its real card name via
+    `GET /v1/cards/{id}` - for a Commander-format deck, the "main card" is
+    the commander itself (the same assumption `fetch_popular_decks` already
+    stores as `main_card_id`). One request per ID, paced the same as the
+    rest of this module - no bulk lookup endpoint was found live.
+
+    A *generator*, not a function returning a full dict, so a caller
+    (discover_service) can persist each resolution to
+    app.models.discover.MoxfieldCommanderCache as it arrives instead of only
+    at the very end - real cost here is large (~1.7h for a first full
+    resolution across this project's real ~6,300-deck Moxfield cache,
+    confirmed live via sampling) and a mid-run crash/worker-restart (see
+    CLAUDE.md gotcha #29 - not hypothetical, worker restarts happen
+    routinely during dev) shouldn't discard everything already resolved.
+
+    `known` lets a caller skip IDs already resolved by a previous run - a
+    card's name never changes, so a resync only ever pays for genuinely new
+    commanders, not the full set every time. A 404 (a mainCardId pointing
+    at a removed/invalid card) or any other non-200 response is skipped
+    rather than raised - one bad ID shouldn't abort the whole sync over a
+    single unresolved commander name.
+    """
+    known = known or {}
+    headers = {"User-Agent": user_agent, "Accept": "application/json"}
+    to_fetch = [mid for mid in main_card_ids if mid and mid not in known]
+
+    first = True
+    for main_card_id in to_fetch:
+        if not first:
+            time.sleep(POPULAR_DECKS_REQUEST_DELAY_SECONDS)
+        first = False
+
+        resp = httpx.get(f"{COMMANDER_LOOKUP_API}/{main_card_id}", headers=headers, timeout=15)
+        if resp.status_code != 200:
+            continue
+        try:
+            name = (resp.json().get("card") or {}).get("name")
+        except ValueError:
+            continue
+        if name:
+            yield main_card_id, name

@@ -98,6 +98,122 @@ def test_list_decks_bracket_filter():
     assert len(unfiltered) == 3
 
 
+def test_list_decks_name_search_case_insensitive_substring():
+    _seed_deck(external_id="winota", name="Winota: Snowball Stax")
+    _seed_deck(external_id="najeela", name="Najeela Warrior Queen")
+
+    resp = client.get("/api/discover/decks?q=snowball").json()
+    assert [d["name"] for d in resp] == ["Winota: Snowball Stax"]
+
+    resp = client.get("/api/discover/decks?q=WINOTA").json()
+    assert [d["name"] for d in resp] == ["Winota: Snowball Stax"]
+
+    resp = client.get("/api/discover/decks?q=doesnotexist").json()
+    assert resp == []
+
+
+def test_list_decks_name_search_matches_commander_name_too():
+    _seed_deck(external_id="winota", name="Some Weird Deck Name", commander_name="Winota, Joiner of Forces")
+    _seed_deck(external_id="other", name="Other Deck", commander_name="Najeela, the Blade-Blossom")
+
+    resp = client.get("/api/discover/decks?q=winota").json()
+    assert [d["name"] for d in resp] == ["Some Weird Deck Name"]
+
+
+def test_list_decks_has_primer_filter():
+    _seed_deck(external_id="primer", name="Has Primer", has_primer=True)
+    _seed_deck(external_id="no-primer", name="No Primer", has_primer=False)
+
+    resp = client.get("/api/discover/decks?has_primer=true").json()
+    assert [d["name"] for d in resp] == ["Has Primer"]
+
+
+def test_list_decks_min_deck_size_filter():
+    _seed_deck(external_id="full", name="Full Deck", deck_size=100)
+    _seed_deck(external_id="partial", name="Partial Deck", deck_size=42)
+    _seed_deck(external_id="unknown", name="Unknown Size", deck_size=None)
+
+    resp = client.get("/api/discover/decks?min_deck_size=100").json()
+    assert [d["name"] for d in resp] == ["Full Deck"]
+
+
+def test_list_decks_exclude_theorycrafted_filter():
+    _seed_deck(external_id="real", name="Real Deck", theorycrafted=False)
+    _seed_deck(external_id="theory", name="Theory Deck", theorycrafted=True)
+    _seed_deck(external_id="unknown", name="Moxfield Deck", theorycrafted=None)
+
+    resp = client.get("/api/discover/decks?exclude_theorycrafted=true").json()
+    names = {d["name"] for d in resp}
+    assert names == {"Real Deck", "Moxfield Deck"}  # unknown (Moxfield) is never excluded, only a real True is
+
+    unfiltered = client.get("/api/discover/decks").json()
+    assert len(unfiltered) == 3
+
+
+def test_list_decks_updated_after_days_filter():
+    from datetime import UTC, datetime, timedelta
+
+    _seed_deck(external_id="fresh", name="Fresh Deck", deck_updated_at=datetime.now(UTC))
+    _seed_deck(external_id="stale", name="Stale Deck", deck_updated_at=datetime.now(UTC) - timedelta(days=400))
+    _seed_deck(external_id="unknown", name="No Timestamp", deck_updated_at=None)
+
+    resp = client.get("/api/discover/decks?updated_after_days=30").json()
+    assert [d["name"] for d in resp] == ["Fresh Deck"]
+
+
+def test_list_decks_tag_filter():
+    _seed_deck(external_id="tagged", name="Competitive Deck", tags=["Competitive"])
+    _seed_deck(external_id="other-tag", name="Budget Deck", tags=["Budget"])
+    _seed_deck(external_id="no-tags", name="Untagged Deck", tags=None)
+
+    resp = client.get("/api/discover/decks?tag=Competitive").json()
+    assert [d["name"] for d in resp] == ["Competitive Deck"]
+
+
+def test_list_decks_sort_by_comments_and_bookmarks():
+    _seed_deck(external_id="a", name="A", comment_count=5, bookmark_count=50)
+    _seed_deck(external_id="b", name="B", comment_count=50, bookmark_count=5)
+
+    by_comments = client.get("/api/discover/decks?sort=comments").json()
+    assert [d["name"] for d in by_comments] == ["B", "A"]
+
+    by_bookmarks = client.get("/api/discover/decks?sort=bookmarks").json()
+    assert [d["name"] for d in by_bookmarks] == ["A", "B"]
+
+
+def test_archidekt_commander_search_proxies_live_and_intersects_cache(monkeypatch: pytest.MonkeyPatch):
+    from app.source_adapters import archidekt
+
+    _seed_deck(external_id="111", name="Cached Winota Deck", source="archidekt")
+    # A live result the API returns but this project hasn't cached (never
+    # synced) - must be silently excluded, not fabricated into a thin row.
+    monkeypatch.setattr(archidekt, "search_by_commander", lambda commander, user_agent: {"111", "999-not-cached"})
+
+    resp = client.get("/api/discover/decks/archidekt-commander-search?commander=Winota")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [d["name"] for d in body] == ["Cached Winota Deck"]
+
+
+def test_archidekt_commander_search_empty_query_returns_empty():
+    resp = client.get("/api/discover/decks/archidekt-commander-search?commander=")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+def test_archidekt_commander_search_upstream_failure_is_502(monkeypatch: pytest.MonkeyPatch):
+    from app.source_adapters import archidekt
+    from app.source_adapters.errors import SourceFetchError
+
+    def raise_error(commander: str, user_agent: str) -> set[str]:
+        raise SourceFetchError("Archidekt commander search returned HTTP 500")
+
+    monkeypatch.setattr(archidekt, "search_by_commander", raise_error)
+
+    resp = client.get("/api/discover/decks/archidekt-commander-search?commander=Winota")
+    assert resp.status_code == 502
+
+
 def test_price_deck_caches_result_and_returns_it(monkeypatch: pytest.MonkeyPatch):
     _seed_deck(external_id="price-me", name="Price Me")
     db = get_sessionmaker()()

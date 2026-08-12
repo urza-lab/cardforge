@@ -541,6 +541,77 @@ warm-cache-reuse, stale-serves-old-data-with-refreshing-flag,
 concurrent-stale-requests-trigger-only-one-refresh, and `clear()`);
 `ruff`, `mypy`, and the frontend `lint`/`build` are all clean.
 
+**Discover Decks search + real attribute filters, user-requested because deck
+names alone ("wild"/unsystematic) made real filtering impossible.** Asked
+whether commander search was really infeasible before assuming so - live
+probing (the same "read the real API, don't guess" technique that found
+Archidekt's cube search and CubeCobra's routes) turned up two completely
+different real answers per source, not one: Moxfield's search API has no
+working commander filter at all (confirmed via a nonsense-value control
+request returning identical results to no filter), but every commander-
+format deck's search row already carries `mainCardId` (Moxfield's internal
+id for the deck's "main card" = its commander), and a real, working per-ID
+lookup (`GET /v1/cards/{id}`) resolves that to an actual card name - no
+bulk endpoint exists, so this means one paced request per *unique*
+commander, permanently cached (`app.models.discover.
+MoxfieldCommanderCache` - a card's name never changes, so a resync only
+ever pays for genuinely new commanders). Archidekt is the mirror image: no
+commander field ever appears in its search rows, but a real, working
+`commanderName` *filter* param exists (also confirmed via the same
+nonsense-value control test) - useless for populating stored data, but
+usable as a live, on-demand query. User chose to build both rather than
+Moxfield-only, explicitly accepting the tradeoffs (rate-limit exposure,
+availability coupling, asymmetric behavior) after they were laid out - and
+specifically asked that the Archidekt side only fire on submit/Enter, not
+per keystroke, unlike Moxfield's local (and therefore cheap) debounced
+search (`GET /api/discover/decks/archidekt-commander-search`, a separate
+endpoint from the regular `q` filter, deliberately not folded in). Real
+per-deck-sync cost, confirmed by live sampling before committing to it:
+resolving Moxfield's real ~6,300-deck cache's unique commanders is a
+one-time ~1.7h job at the existing 1.5s Moxfield-safe pacing (gotcha #23) -
+`trigger_sync`'s job_timeout was bumped 1800s -> 14400s (4h) for real
+headroom, matching the "the ceiling costs nothing once the cache is warm"
+reasoning already used for MoxfieldCommanderCache itself. A commander-
+resolution failure is tracked separately from a source's own fetch failure
+(`warnings` vs. `errors` in `run_discovery_sync`) so a real hiccup there
+can't make an otherwise-fully-successful sync register as FAILED.
+Alongside commander search, several more real, free fields already present
+in each source's search response (verified live, not assumed) were added
+as filters/columns: `has_primer`, `deck_size` (a "complete decks only"
+checkbox), `comment_count`/`bookmark_count` (new sort options),
+`deck_updated_at` (a real "updated in the last N days" filter, not this
+project's own sync timestamp), `tags` (Moxfield's hubNames / Archidekt's
+tags - free-form and source-specific, not a unified taxonomy, exposed as a
+plain exact-match filter with that caveat surfaced in the UI), and
+`theorycrafted` (Archidekt-only "never actually built" flag - `None` for
+Moxfield rows, which the exclude-filter always treats as "not excluded,"
+never as a false negative). **Complete and verified end-to-end against
+real, live data** (a full-scale resync was deliberately *not* run in this
+session given its real ~1.7h first-time cost - see below): a live,
+reduced-page-count sample (153 real Moxfield decks, 60 real Archidekt
+decks - not the full sync) confirmed every new field extracts correctly
+from each source's real response, all 141 real unique commander IDs in
+that Moxfield sample resolved to real card names (K'rrik Son of
+Yawgmoth, Sauron the Dark Lord, Night's Whisper, Yawgmoth Thran
+Physician, Betor Ancestor's Voice, ...) via the real `iter_resolved_
+commander_names` function (not a mock), and a real call to `archidekt.
+search_by_commander("Winota, Joiner of Forces", ...)` returned 60 real
+matching external_ids via the actual live endpoint. 25 new backend tests
+pass (mocked-httpx adapter tests plus discover_service wiring tests
+covering cache-hit/cache-miss/partial-failure-is-a-warning); 385 backend
+tests total; `ruff`, `mypy`, and the frontend `lint`/`build` are all
+clean. A real, full `docker compose down && up -d --build --profile
+observability` cycle was verified afterward with the real 18,312-deck
+cache intact and every new query param (`q` now also matching
+`commander_name`, `has_primer`, `min_deck_size`, `exclude_theorycrafted`,
+`updated_after_days`, `tag`, `sort=comments`/`bookmarks`, and the live
+Archidekt commander endpoint) confirmed returning HTTP 200 through the
+real nginx proxy - though since the existing 18,312 cached decks all
+predate this feature, their new columns are still NULL until a real full
+resync runs (the ~1.7h Moxfield-commander first-time cost above), which
+is why this was verified via live sampling rather than by asserting on
+the current cache's contents.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key
