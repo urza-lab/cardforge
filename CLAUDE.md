@@ -870,6 +870,56 @@ never creates duplicates) was re-triggered live with the fix deployed -
 see the next entry for the real, confirmed outcome once it finishes (not
 asserted here in advance).
 
+**Gotcha #41 - a multi-hour, thousands-of-requests scrape needs to
+tolerate one bad request, and didn't.** After gotchas #38-40 were fixed,
+two separate full-scrape attempts both got much further (7,272 and 7,032
+real pages, ~192k-199k real cubes) but each still eventually died on a
+real, transient `_ssl.c:993: The handshake operation timed out` - at a
+suspiciously similar elapsed time both runs (~3.3-3.5h), though the exact
+cause of that particular timing wasn't conclusively pinned down. Whatever
+the root trigger, the actual bug was architectural: `iter_all_cubes` had
+no tolerance at all for a single failed request in the middle of a
+walk that can run for hours - one transient network hiccup discarded
+every subsequent page's worth of progress for that run (though, as
+designed back in gotcha #38/#40's fixes, never anything already
+committed from *before* the failure). Fixed with a small retry-with-
+backoff (`_post_with_retry`, up to 3 retries with a 5s backoff) around
+just the transport-level failure class (`httpx.TransportError` - connection
+resets, SSL/handshake timeouts, read timeouts), deliberately *not*
+wrapping real HTTP error statuses (a 429/5xx is meaningful data about the
+request, not evidence it never happened, and retrying those immediately
+would be counterproductive rather than helpful). 2 new tests (retries-
+then-succeeds, gives-up-after-max-retries-and-raises); 400 backend tests
+total; `ruff`, `mypy`, and the frontend `lint`/`build` are all clean.
+Deployed and a fourth full-scrape attempt retriggered live - see the
+next entry (or CLAUDE.md's own future update) for the real, confirmed
+outcome, not asserted here in advance.
+
+**Cursor persistence, user-caught live: a retry always restarted the full
+scrape from page 1, which is safe (upserts never duplicate) but wastes
+real hours re-covering already-known ground before ever reaching new
+territory past the previous failure point.** `CubeFullScrapeState.last_key`
+(new `Text` column - deliberately unbounded, not a sized `VARCHAR`, given
+gotcha #40 just happened from guessing a column width wrong) persists
+CubeCobra's own DynamoDB pagination cursor after every page.
+`iter_all_cubes` gained a `start_key` parameter (resuming a walk from
+exactly there) and now yields `(page, last_key)` pairs instead of just
+`page`, so `run_full_cube_scrape` can persist the cursor incrementally the
+same way it already persists `cubes_found`/`pages_fetched`. Only cleared
+back to `None` on genuine completion (exhaustion reached, nothing left to
+resume); left in place on failure specifically so the next trigger resumes
+there instead of page 1. 3 new tests (adapter-level resume-from-start_key,
+service-level cursor-survives-a-failure and resumes-on-next-trigger); 402
+backend tests total; `ruff`, `mypy` clean. A real migration-vs-model race
+was hit live deploying this (not the retry logic itself, a separate small
+mistake): editing the SQLAlchemy model before writing the migration meant
+the backend's `--reload` picked up the new column immediately while the
+real DB didn't have it yet, breaking every `/full-scrape/status` request
+with a real `UndefinedColumn` error for the ~90s it took to generate and
+apply the migration - a reminder that model edits and their migration
+aren't atomic against a hot-reloading dev backend, even within the same
+few minutes of work.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key

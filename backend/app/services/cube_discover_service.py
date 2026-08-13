@@ -6,6 +6,7 @@ separate cache from `PopularDeck`.
 """
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, func, insert, select, update
@@ -197,9 +198,22 @@ def run_full_cube_scrape(db: Session, settings: Settings | None = None) -> CubeF
     one page's own request, and a worker restart/crash partway through
     should never lose cubes already found, nor ever create duplicates of a
     cube seen more than once across pages or across scrapes.
+
+    Resumes from `state.last_key` (CubeCobra's own pagination cursor,
+    persisted after every page - see CubeFullScrapeState's own docstring)
+    if one is already stored, rather than always restarting from page 1 -
+    user-requested/found live: two real multi-hour attempts both died on a
+    transient network error thousands of pages in, and retrying always
+    re-walked the same already-known ground first before ever reaching new
+    territory, wasting real hours re-covering it. Only cleared back to None
+    on a genuinely successful completion (nothing left to resume from);
+    left in place on failure specifically so the next trigger picks up
+    here instead of page 1.
     """
     settings = settings or get_settings()
     state = get_full_scrape_state(db)
+
+    resume_key: object | None = json.loads(state.last_key) if state.last_key else None
 
     state.status = CubeFullScrapeStatus.running.value
     state.started_at = datetime.now(UTC)
@@ -208,7 +222,7 @@ def run_full_cube_scrape(db: Session, settings: Settings | None = None) -> CubeF
     db.commit()
 
     try:
-        for page in cubecobra.iter_all_cubes(settings.scryfall_user_agent):
+        for page, new_last_key in cubecobra.iter_all_cubes(settings.scryfall_user_agent, start_key=resume_key):
             if page:
                 now = datetime.now(UTC)
                 stmt = pg_insert(PopularCube).values(
@@ -255,10 +269,12 @@ def run_full_cube_scrape(db: Session, settings: Settings | None = None) -> CubeF
             state.cubes_found += len(page)
             state.pages_fetched += 1
             state.last_progress_at = datetime.now(UTC)
+            state.last_key = json.dumps(new_last_key) if new_last_key else None
             db.commit()
 
         state.status = CubeFullScrapeStatus.completed.value
         state.finished_at = datetime.now(UTC)
+        state.last_key = None  # genuine exhaustion reached - nothing left to resume from
         db.commit()
     except Exception as exc:  # noqa: BLE001 - any failure must be recorded, not silently swallowed
         db.rollback()

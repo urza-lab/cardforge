@@ -107,9 +107,9 @@ def test_run_cube_discovery_sync_preserves_import_state_across_resync(monkeypatc
 
 
 def test_run_full_cube_scrape_success_tracks_progress(monkeypatch: pytest.MonkeyPatch):
-    def fake_iter_all_cubes(user_agent: str):
-        yield [_entry("a"), _entry("b")]
-        yield [_entry("c")]
+    def fake_iter_all_cubes(user_agent: str, *, start_key: object = None):
+        yield [_entry("a"), _entry("b")], {"PK": "1"}
+        yield [_entry("c")], None
 
     monkeypatch.setattr(cube_discover_service.cubecobra, "iter_all_cubes", fake_iter_all_cubes)
 
@@ -121,6 +121,7 @@ def test_run_full_cube_scrape_success_tracks_progress(monkeypatch: pytest.Monkey
         assert state.pages_fetched == 2
         assert state.last_progress_at is not None
         assert state.finished_at is not None
+        assert state.last_key is None  # genuine exhaustion reached - nothing left to resume from
 
         cubes = db.query(PopularCube).all()
         assert {c.external_id for c in cubes} == {"a", "b", "c"}
@@ -135,9 +136,9 @@ def test_run_full_cube_scrape_upserts_without_duplicates(monkeypatch: pytest.Mon
     uses (see PopularCube's own unique constraint).
     """
 
-    def fake_iter_all_cubes(user_agent: str):
-        yield [_entry("a", name="Old Name")]
-        yield [_entry("a", name="New Name")]  # same external_id, real update
+    def fake_iter_all_cubes(user_agent: str, *, start_key: object = None):
+        yield [_entry("a", name="Old Name")], {"PK": "1"}
+        yield [_entry("a", name="New Name")], None  # same external_id, real update
 
     monkeypatch.setattr(cube_discover_service.cubecobra, "iter_all_cubes", fake_iter_all_cubes)
 
@@ -168,8 +169,8 @@ def test_run_full_cube_scrape_preserves_import_state(monkeypatch: pytest.MonkeyP
         cube.imported_list_id = card_list.id
         db.commit()
 
-        def fake_iter_all_cubes(user_agent: str):
-            yield [_entry("a", name="Rescraped Name")]
+        def fake_iter_all_cubes(user_agent: str, *, start_key: object = None):
+            yield [_entry("a", name="Rescraped Name")], None
 
         monkeypatch.setattr(cube_discover_service.cubecobra, "iter_all_cubes", fake_iter_all_cubes)
         cube_discover_service.run_full_cube_scrape(db)
@@ -183,8 +184,8 @@ def test_run_full_cube_scrape_preserves_import_state(monkeypatch: pytest.MonkeyP
 
 
 def test_run_full_cube_scrape_failure_records_error(monkeypatch: pytest.MonkeyPatch):
-    def fake_iter_all_cubes(user_agent: str):
-        yield [_entry("a")]
+    def fake_iter_all_cubes(user_agent: str, *, start_key: object = None):
+        yield [_entry("a")], {"PK": "resume-here"}
         raise SourceFetchError("connection reset")
 
     monkeypatch.setattr(cube_discover_service.cubecobra, "iter_all_cubes", fake_iter_all_cubes)
@@ -200,8 +201,38 @@ def test_run_full_cube_scrape_failure_records_error(monkeypatch: pytest.MonkeyPa
         # The page fetched before the failure must still be committed - a
         # crash partway through must not lose progress already made.
         assert db.query(PopularCube).filter_by(external_id="a").one_or_none() is not None
+        # The cursor from the last successful page must survive the failure
+        # too - user-requested/found live: a retry needs this to resume
+        # instead of re-walking from page 1 (see CLAUDE.md).
+        assert state.last_key == '{"PK": "resume-here"}'
     finally:
         db.close()
+
+
+def test_run_full_cube_scrape_resumes_from_persisted_cursor(monkeypatch: pytest.MonkeyPatch):
+    db = get_sessionmaker()()
+    try:
+        state = cube_discover_service.get_full_scrape_state(db)
+        state.last_key = '{"PK": "page-5"}'
+        db.commit()
+    finally:
+        db.close()
+
+    seen_start_keys: list[object] = []
+
+    def fake_iter_all_cubes(user_agent: str, *, start_key: object = None):
+        seen_start_keys.append(start_key)
+        yield [_entry("resumed")], None
+
+    monkeypatch.setattr(cube_discover_service.cubecobra, "iter_all_cubes", fake_iter_all_cubes)
+
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.run_full_cube_scrape(db)
+    finally:
+        db.close()
+
+    assert seen_start_keys == [{"PK": "page-5"}]
 
 
 def test_run_full_cube_scrape_truncates_overlong_fields_instead_of_crashing(monkeypatch: pytest.MonkeyPatch):
@@ -216,14 +247,14 @@ def test_run_full_cube_scrape_truncates_overlong_fields_instead_of_crashing(monk
     long_name = "X" * 300  # PopularCube.name is String(256)
     long_owner = "Y" * 200  # owner_username is String(128)
 
-    def fake_iter_all_cubes(user_agent: str):
+    def fake_iter_all_cubes(user_agent: str, *, start_key: object = None):
         yield [
             PopularCubeEntry(
                 external_id="a", short_id="a", name=long_name, owner_username=long_owner,
                 source_url="https://cubecobra.com/cube/list/a", card_count=360, like_count=100, tags=None,
                 num_decks=42, date_last_updated=None,
             )
-        ]
+        ], None
 
     monkeypatch.setattr(cube_discover_service.cubecobra, "iter_all_cubes", fake_iter_all_cubes)
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 import enum
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, String, func
+from sqlalchemy import ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -120,3 +120,14 @@ class CubeFullScrapeState(Base):
     cubes_found: Mapped[int] = mapped_column(default=0)
     pages_fetched: Mapped[int] = mapped_column(default=0)
     error_message: Mapped[str | None] = mapped_column(String(1024))
+    # CubeCobra's own DynamoDB pagination cursor (JSON-serialized), updated
+    # after every page - user-requested/found live: without this, retrying
+    # a failed/interrupted scrape always re-walked from page 1, real network
+    # requests included, discarding no data (upserts never duplicate) but
+    # wasting real time re-covering already-known ground before ever
+    # reaching new territory past the previous failure point. `Text`, not a
+    # bounded VARCHAR - unlike the other string fields here (see gotcha #40),
+    # this one has no real column-width precedent to size against, and
+    # getting it wrong the same way would silently break resume instead of
+    # just one row's display data.
+    last_key: Mapped[str | None] = mapped_column(Text)

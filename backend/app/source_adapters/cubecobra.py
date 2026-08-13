@@ -47,6 +47,18 @@ CSV_ENDPOINT = "https://cubecobra.com/cube/download/csv"
 POPULAR_CUBES_PAGES = 40
 POPULAR_CUBES_REQUEST_DELAY_SECONDS = 0.5
 
+# A real full-catalog scrape (app.services.cube_discover_service.
+# run_full_cube_scrape) makes thousands of sequential requests over several
+# hours - confirmed live to hit a real, transient SSL handshake timeout
+# twice in separate multi-hour runs, both around the ~3.3-3.5h/~7,000-page
+# mark (see CLAUDE.md). A single transient network hiccup that deep into a
+# multi-hour job shouldn't abort everything after it - retry the one
+# failing request with a short backoff before giving up, same "don't let
+# one bad thing sink the whole batch" principle as gotcha #34's row-level
+# truncation fix, just at the request level instead of the row level.
+POPULAR_CUBES_MAX_RETRIES = 3
+POPULAR_CUBES_RETRY_BACKOFF_SECONDS = 5.0
+
 # CubeCobra's real CSV export header names (confirmed live) mapped onto our
 # canonical CardListItem fields - passed as an explicit column_mapping to
 # app.parsers.list_csv.parse_list_csv rather than relying on its own header-
@@ -187,6 +199,27 @@ def _map_cube_entry(c: dict[str, Any]) -> PopularCubeEntry | None:
     )
 
 
+def _post_with_retry(url: str, *, json: dict[str, Any], headers: dict[str, str], page_num: int) -> httpx.Response:
+    """Retries a single page request on a transient transport-level error
+    (connection reset, SSL handshake timeout, read timeout, etc.) - not on
+    a real HTTP error status, which the caller handles itself (a 429/5xx is
+    data about the request, not evidence the request never happened, so
+    retrying it here isn't the right layer for that). See
+    POPULAR_CUBES_MAX_RETRIES's own comment for why this exists.
+    """
+    last_exc: httpx.TransportError | None = None
+    for attempt in range(POPULAR_CUBES_MAX_RETRIES + 1):
+        try:
+            return httpx.post(url, json=json, headers=headers, timeout=30)
+        except httpx.TransportError as exc:
+            last_exc = exc
+            if attempt < POPULAR_CUBES_MAX_RETRIES:
+                time.sleep(POPULAR_CUBES_RETRY_BACKOFF_SECONDS)
+    raise SourceFetchError(
+        f"CubeCobra cube search failed after {POPULAR_CUBES_MAX_RETRIES + 1} attempts (page={page_num}): {last_exc}"
+    ) from last_exc
+
+
 def fetch_popular_cubes(user_agent: str, *, pages: int = POPULAR_CUBES_PAGES) -> list[PopularCubeEntry]:
     """Real public data from CubeCobra's own search, sorted by real like
     count - see module docstring for the endpoint. Paginated via lastKey
@@ -194,12 +227,14 @@ def fetch_popular_cubes(user_agent: str, *, pages: int = POPULAR_CUBES_PAGES) ->
     order rather than fetching them independently.
     """
     entries: list[PopularCubeEntry] = []
-    for page in iter_all_cubes(user_agent, max_pages=pages):
+    for page, _last_key in iter_all_cubes(user_agent, max_pages=pages):
         entries.extend(page)
     return entries
 
 
-def iter_all_cubes(user_agent: str, *, max_pages: int | None = None) -> Iterator[list[PopularCubeEntry]]:
+def iter_all_cubes(
+    user_agent: str, *, max_pages: int | None = None, start_key: object | None = None
+) -> Iterator[tuple[list[PopularCubeEntry], object | None]]:
     """Walks CubeCobra's real search API to genuine exhaustion (until its
     `lastKey` cursor runs out), not stopping at a fixed page count like
     `fetch_popular_cubes` does - user-requested full-catalog scrape, since
@@ -208,7 +243,12 @@ def iter_all_cubes(user_agent: str, *, max_pages: int | None = None) -> Iterator
     real 0-like, 0-deck cube a user linked - see CLAUDE.md). `max_pages`
     exists only so `fetch_popular_cubes` above can reuse this same walk
     logic with its existing bound; the real full-scrape caller leaves it
-    unset.
+    unset. `start_key` resumes a previous walk from exactly where it left
+    off (user-requested/found live: without this, retrying a failed multi-
+    hour scrape always restarted from page 1, real network requests
+    included, re-covering already-known ground before ever reaching new
+    territory - safe, since upserts never duplicate, but a real waste of
+    hours) - `None` (the default) starts a fresh walk from the beginning.
 
     A generator, not a function returning the full list, so a caller
     (cube_discover_service.run_full_cube_scrape) can persist progress
@@ -216,21 +256,25 @@ def iter_all_cubes(user_agent: str, *, max_pages: int | None = None) -> Iterator
     real total cube count in advance (CubeCobra exposes no count endpoint),
     so this can run for an unknown, potentially very long time, and a
     worker restart or crash partway through should lose at most the
-    in-flight page, not everything found so far.
+    in-flight page, not everything found so far. Yields `(page, last_key)`
+    pairs - `last_key` is CubeCobra's own cursor *after* this page, i.e.
+    exactly what a caller should persist and later pass back as `start_key`
+    to resume from here; `None` means the walk reached genuine exhaustion
+    on this same page.
     """
     headers = {"User-Agent": user_agent, "Content-Type": "application/json", "Accept": "application/json"}
-    last_key: object | None = None
+    last_key: object | None = start_key
     page_num = 0
 
     while max_pages is None or page_num < max_pages:
         if page_num > 0:
             time.sleep(POPULAR_CUBES_REQUEST_DELAY_SECONDS)
 
-        resp = httpx.post(
+        resp = _post_with_retry(
             SEARCH_ENDPOINT,
             json={"lastKey": last_key, "query": "", "order": "pop", "ascending": False},
             headers=headers,
-            timeout=30,
+            page_num=page_num,
         )
         if resp.status_code != 200:
             raise SourceFetchError(f"CubeCobra cube search returned HTTP {resp.status_code} (page={page_num})")
@@ -241,9 +285,9 @@ def iter_all_cubes(user_agent: str, *, max_pages: int | None = None) -> Iterator
             return
 
         page = [entry for c in cubes_raw if (entry := _map_cube_entry(c)) is not None]
-        yield page
+        last_key = data.get("lastKey")
+        yield page, last_key
 
         page_num += 1
-        last_key = data.get("lastKey")
         if not last_key:
             return

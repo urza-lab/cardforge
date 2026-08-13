@@ -181,11 +181,12 @@ def test_iter_all_cubes_walks_past_any_fixed_page_count(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(cubecobra.httpx, "post", fake_post)
 
-    pages = list(cubecobra.iter_all_cubes("test-agent"))
+    results = list(cubecobra.iter_all_cubes("test-agent"))
 
     assert len(calls) == total_pages
-    assert len(pages) == total_pages
-    assert [p[0].external_id for p in pages] == [f"cube-{i}" for i in range(1, total_pages + 1)]
+    assert len(results) == total_pages
+    assert [page[0].external_id for page, _last_key in results] == [f"cube-{i}" for i in range(1, total_pages + 1)]
+    assert results[-1][1] is None  # last page's own lastKey signals real exhaustion
 
 
 def test_iter_all_cubes_yields_incrementally_as_pages_are_fetched(monkeypatch: pytest.MonkeyPatch):
@@ -206,7 +207,71 @@ def test_iter_all_cubes_yields_incrementally_as_pages_are_fetched(monkeypatch: p
     monkeypatch.setattr(cubecobra.httpx, "post", fake_post)
 
     gen = cubecobra.iter_all_cubes("test-agent")
-    first_page = next(gen)
+    first_page, first_last_key = next(gen)
 
     assert len(calls) == 1
     assert first_page[0].external_id == "cube-1"
+    assert first_last_key == {"PK": "page-1"}
+
+
+def test_iter_all_cubes_resumes_from_a_given_start_key(monkeypatch: pytest.MonkeyPatch):
+    """User-requested/found live: retrying a failed multi-hour scrape used
+    to always restart from page 1, wasting real hours re-covering already-
+    known ground. `start_key` lets a caller resume exactly where a previous
+    walk left off instead.
+    """
+    monkeypatch.setattr(cubecobra.time, "sleep", lambda *_: None)
+    calls: list[dict[str, object]] = []
+
+    def fake_post(url: str, json: dict[str, object], headers: dict[str, str], timeout: float) -> httpx.Response:
+        calls.append(dict(json))
+        cube = {"id": "resumed-cube", "shortId": "resumed-cube", "name": "Resumed"}
+        return _search_response([cube], last_key=None)
+
+    monkeypatch.setattr(cubecobra.httpx, "post", fake_post)
+
+    results = list(cubecobra.iter_all_cubes("test-agent", start_key={"PK": "page-5"}))
+
+    assert len(calls) == 1
+    assert calls[0]["lastKey"] == {"PK": "page-5"}  # the very first request already resumes, not starts from None
+    assert results[0][0][0].external_id == "resumed-cube"
+
+
+def test_iter_all_cubes_retries_transient_transport_errors(monkeypatch: pytest.MonkeyPatch):
+    """Real bug found live: a real multi-hour full-catalog scrape hit a
+    real SSL handshake timeout twice in separate runs, both aborting
+    ~7,000 pages of otherwise-good progress over one transient failure.
+    A single request should retry before giving up on the whole scrape.
+    """
+    monkeypatch.setattr(cubecobra.time, "sleep", lambda *_: None)
+    calls = {"n": 0}
+
+    def flaky_post(url: str, json: dict[str, object], headers: dict[str, str], timeout: float) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise httpx.ConnectTimeout("_ssl.c:993: The handshake operation timed out")
+        return _search_response([{"id": "cube-1", "shortId": "slug-1", "name": "Cube 1"}], last_key=None)
+
+    monkeypatch.setattr(cubecobra.httpx, "post", flaky_post)
+
+    results = list(cubecobra.iter_all_cubes("test-agent"))
+
+    assert calls["n"] == 3  # two failed attempts, then a real success
+    assert len(results) == 1
+    assert results[0][0][0].external_id == "cube-1"
+
+
+def test_iter_all_cubes_gives_up_after_max_retries(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(cubecobra.time, "sleep", lambda *_: None)
+    calls = {"n": 0}
+
+    def always_fails(url: str, json: dict[str, object], headers: dict[str, str], timeout: float) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ConnectTimeout("_ssl.c:993: The handshake operation timed out")
+
+    monkeypatch.setattr(cubecobra.httpx, "post", always_fails)
+
+    with pytest.raises(SourceFetchError):
+        list(cubecobra.iter_all_cubes("test-agent"))
+
+    assert calls["n"] == cubecobra.POPULAR_CUBES_MAX_RETRIES + 1
