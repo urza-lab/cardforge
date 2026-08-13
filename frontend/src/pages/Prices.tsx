@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { apiGet, apiPostJson, apiPutJson, ApiError } from "../api/client";
 import type { MtgjsonSyncStatusRead, PriceProfile, PriceProvider } from "../types/pricing";
+import { parseUtcTimestamp } from "../utils/time";
 
 const POLL_INTERVAL_MS = 3000;
 const ALL_PROVIDERS: PriceProvider[] = ["manual", "mtgjson", "scryfall"];
@@ -156,7 +157,7 @@ export default function Prices() {
             </div>
             {mtgjson.finished_at && mtgjson.status !== "FETCHING" && (
               <p style={{ color: "var(--cf-muted)" }}>
-                {t("pricesPage.mtgjson.lastUpdated")} {new Date(mtgjson.finished_at).toLocaleString()}
+                {t("pricesPage.mtgjson.lastUpdated")} {new Date(parseUtcTimestamp(mtgjson.finished_at)).toLocaleString()}
               </p>
             )}
             {mtgjson.status === "FAILED" && mtgjson.error_message && (

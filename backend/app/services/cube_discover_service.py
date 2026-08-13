@@ -29,6 +29,24 @@ from app.services import list_import_service, list_service
 from app.source_adapters import cubecobra
 
 
+def _truncate(value: str | None, max_length: int) -> str | None:
+    """Defensively bounds a field to its own PopularCube column width
+    before insert - same reasoning and shape as
+    app.services.list_import_service._truncate (see CLAUDE.md gotcha #34):
+    a real cube's name/username can just be longer than the column allows,
+    confirmed live by a real `StringDataRightTruncation` 34,554 cubes into
+    a real full-catalog scrape (deep, unpopular cubes this project had
+    never fetched before - the bounded, popularity-limited sync never hit
+    this in its ~1,000-1,400-cube range). Truncating rather than rejecting
+    the whole row keeps one long value from aborting an otherwise-good
+    batch, matching the "one malformed row shouldn't sink the rest"
+    principle gotcha #34 established.
+    """
+    if value is None:
+        return None
+    return value[:max_length]
+
+
 class SyncAlreadyInProgressError(Exception):
     pass
 
@@ -93,11 +111,11 @@ def run_cube_discovery_sync(db: Session, settings: Settings | None = None) -> Cu
                 insert(PopularCube),
                 [
                     {
-                        "external_id": c.external_id,
-                        "short_id": c.short_id,
-                        "name": c.name,
-                        "owner_username": c.owner_username,
-                        "source_url": c.source_url,
+                        "external_id": _truncate(c.external_id, 64),
+                        "short_id": _truncate(c.short_id, 128),
+                        "name": _truncate(c.name, 256),
+                        "owner_username": _truncate(c.owner_username, 128),
+                        "source_url": _truncate(c.source_url, 512),
                         "card_count": c.card_count,
                         "like_count": c.like_count,
                         "tags": c.tags,
@@ -196,11 +214,11 @@ def run_full_cube_scrape(db: Session, settings: Settings | None = None) -> CubeF
                 stmt = pg_insert(PopularCube).values(
                     [
                         {
-                            "external_id": c.external_id,
-                            "short_id": c.short_id,
-                            "name": c.name,
-                            "owner_username": c.owner_username,
-                            "source_url": c.source_url,
+                            "external_id": _truncate(c.external_id, 64),
+                            "short_id": _truncate(c.short_id, 128),
+                            "name": _truncate(c.name, 256),
+                            "owner_username": _truncate(c.owner_username, 128),
+                            "source_url": _truncate(c.source_url, 512),
                             "card_count": c.card_count,
                             "like_count": c.like_count,
                             "tags": c.tags,

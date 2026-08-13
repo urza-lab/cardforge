@@ -5,6 +5,7 @@ import { apiGet, apiPostJson, ApiError } from "../api/client";
 import type { DeckDiscoverySyncStatusRead, PopularDeck } from "../types/discover";
 import type { CardList, ListImportPreview, ListImportSummary } from "../types/lists";
 import type { PriceProfile } from "../types/pricing";
+import { parseUtcTimestamp } from "../utils/time";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -527,7 +528,9 @@ export default function Discover() {
                         <td>{deck.bracket ?? "—"}</td>
                         <td>{deck.has_primer ? t("common.yes") : "—"}</td>
                         <td>{deck.deck_size ?? "—"}</td>
-                        <td>{deck.deck_updated_at ? new Date(deck.deck_updated_at).toLocaleDateString() : "—"}</td>
+                        <td>
+                          {deck.deck_updated_at ? new Date(parseUtcTimestamp(deck.deck_updated_at)).toLocaleDateString() : "—"}
+                        </td>
                         <td>{deck.tags && deck.tags.length > 0 ? deck.tags.join(", ") : "—"}</td>
                         <td>{deck.view_count.toLocaleString()}</td>
                         <td>{deck.like_count > 0 ? deck.like_count.toLocaleString() : "—"}</td>

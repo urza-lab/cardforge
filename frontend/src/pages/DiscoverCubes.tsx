@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { apiGet, apiPostJson, ApiError } from "../api/client";
 import type { CubeDiscoverySyncStatusRead, CubeFullScrapeStatusRead, PopularCube } from "../types/cubecobra";
+import { parseUtcTimestamp } from "../utils/time";
 
 const POLL_INTERVAL_MS = 3000;
 const FULL_SCRAPE_POLL_INTERVAL_MS = 5000;
@@ -103,7 +104,7 @@ export default function DiscoverCubes() {
 
   const fullScrapeElapsedSeconds =
     fullScrapeStatus?.started_at && fullScrapeStatus.status === "RUNNING"
-      ? (nowTick - new Date(fullScrapeStatus.started_at).getTime()) / 1000
+      ? (nowTick - parseUtcTimestamp(fullScrapeStatus.started_at)) / 1000
       : null;
   const fullScrapeAvgSecondsPerCube =
     fullScrapeElapsedSeconds !== null && fullScrapeStatus && fullScrapeStatus.cubes_found > 0
@@ -434,8 +435,12 @@ export default function DiscoverCubes() {
                         <td>{cube.card_count}</td>
                         <td>{cube.like_count.toLocaleString()}</td>
                         <td>{cube.num_decks !== null ? cube.num_decks.toLocaleString() : "—"}</td>
-                        <td>{cube.date_last_updated ? new Date(cube.date_last_updated).toLocaleDateString() : "—"}</td>
-                        <td>{cube.import_attempted_at ? new Date(cube.import_attempted_at).toLocaleString() : "—"}</td>
+                        <td>
+                          {cube.date_last_updated ? new Date(parseUtcTimestamp(cube.date_last_updated)).toLocaleDateString() : "—"}
+                        </td>
+                        <td>
+                          {cube.import_attempted_at ? new Date(parseUtcTimestamp(cube.import_attempted_at)).toLocaleString() : "—"}
+                        </td>
                         <td>
                           {cube.imported_list_id ? (
                             <Link className="cf-btn" to={`/lists/${cube.imported_list_id}`}>

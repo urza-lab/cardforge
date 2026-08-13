@@ -37,6 +37,31 @@ def test_run_cube_discovery_sync_success(monkeypatch: pytest.MonkeyPatch):
         db.close()
 
 
+def test_run_cube_discovery_sync_truncates_overlong_fields_instead_of_crashing(monkeypatch: pytest.MonkeyPatch):
+    """Same real bug/fix as the full-scrape's own version - applied here
+    too since this bulk insert has the identical unguarded shape, even
+    though the regular sync's popularity-bounded range never happened to
+    hit it live.
+    """
+    long_name = "X" * 300  # PopularCube.name is String(256)
+    entry = PopularCubeEntry(
+        external_id="a", short_id="a", name=long_name, owner_username="Alice",
+        source_url="https://cubecobra.com/cube/list/a", card_count=360, like_count=100, tags=None,
+        num_decks=42, date_last_updated=None,
+    )
+    monkeypatch.setattr(cube_discover_service.cubecobra, "fetch_popular_cubes", lambda user_agent, **kw: [entry])
+
+    db = get_sessionmaker()()
+    try:
+        state = cube_discover_service.run_cube_discovery_sync(db)
+        assert state.status == "CURRENT"
+
+        cube = db.query(PopularCube).filter_by(external_id="a").one()
+        assert len(cube.name) == 256
+    finally:
+        db.close()
+
+
 def test_run_cube_discovery_sync_failure_records_error(monkeypatch: pytest.MonkeyPatch):
     def _boom(user_agent: str, **kw: object) -> list[PopularCubeEntry]:
         raise SourceFetchError("search failed")
@@ -175,6 +200,41 @@ def test_run_full_cube_scrape_failure_records_error(monkeypatch: pytest.MonkeyPa
         # The page fetched before the failure must still be committed - a
         # crash partway through must not lose progress already made.
         assert db.query(PopularCube).filter_by(external_id="a").one_or_none() is not None
+    finally:
+        db.close()
+
+
+def test_run_full_cube_scrape_truncates_overlong_fields_instead_of_crashing(monkeypatch: pytest.MonkeyPatch):
+    """Real bug found live 34,554 cubes into a real full-catalog scrape: a
+    real cube's name/username can simply be longer than the column allows
+    (the bounded, popularity-limited sync never reached deep/obscure
+    enough cubes to hit this) - a raw StringDataRightTruncation aborted
+    the whole batch. Truncating keeps that one long value from sinking an
+    otherwise-good page, matching gotcha #34's "don't let one bad field
+    crash the batch" precedent.
+    """
+    long_name = "X" * 300  # PopularCube.name is String(256)
+    long_owner = "Y" * 200  # owner_username is String(128)
+
+    def fake_iter_all_cubes(user_agent: str):
+        yield [
+            PopularCubeEntry(
+                external_id="a", short_id="a", name=long_name, owner_username=long_owner,
+                source_url="https://cubecobra.com/cube/list/a", card_count=360, like_count=100, tags=None,
+                num_decks=42, date_last_updated=None,
+            )
+        ]
+
+    monkeypatch.setattr(cube_discover_service.cubecobra, "iter_all_cubes", fake_iter_all_cubes)
+
+    db = get_sessionmaker()()
+    try:
+        state = cube_discover_service.run_full_cube_scrape(db)
+        assert state.status == "COMPLETED"
+
+        cube = db.query(PopularCube).filter_by(external_id="a").one()
+        assert len(cube.name) == 256
+        assert len(cube.owner_username) == 128
     finally:
         db.close()
 

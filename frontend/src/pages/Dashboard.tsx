@@ -6,6 +6,7 @@ import { ROW_LIMIT_OPTIONS, type RowLimit, useLimited, useRowLimit } from "../ho
 import { useSort } from "../hooks/useSort";
 import type { DashboardSummary, LeverageCandidate, ListBuildability } from "../types/dashboard";
 import type { UserSettings } from "../types/settings";
+import { parseUtcTimestamp } from "../utils/time";
 
 interface LeverageRow extends LeverageCandidate {
   // Parsed once for numeric sorting/filtering - the API field itself stays
@@ -148,7 +149,8 @@ export default function Dashboard() {
 
       {(summary.computed_at || summary.is_refreshing) && (
         <p style={{ color: "var(--cf-muted)", marginTop: -8 }}>
-          {summary.computed_at && t("dashboardPage.cache.asOf", { time: new Date(summary.computed_at).toLocaleTimeString() })}
+          {summary.computed_at &&
+            t("dashboardPage.cache.asOf", { time: new Date(parseUtcTimestamp(summary.computed_at)).toLocaleTimeString() })}
           {summary.is_refreshing && (
             <>
               {summary.computed_at ? " · " : ""}

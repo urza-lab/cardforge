@@ -765,6 +765,111 @@ into a command targeting frontend unless a Vite dev server is actually
 wanted; use the base `docker-compose.yml` alone for any real frontend
 rebuild, dev session or not.
 
+**Two real, previously-undiscovered bugs found live while verifying the
+CubeCobra full-scrape and Discover Decks commander resolution at real
+scale - both fixed, not just worked around.**
+
+**Gotcha #38 - `rq.Worker`'s default per-job fork is unsafe in this
+process because it also runs background threads, and hung real jobs
+twice with zero warning.** `app/workers/run_worker.py` starts two daemon
+threads (the staleness sweep, the periodic Scryfall/MTGJSON sync loop)
+that periodically do Redis/DB I/O *in the same process* as the RQ
+`Worker`, which by default forks a child process for every job it runs.
+This is the textbook "fork() is unsafe in a multi-threaded process"
+hazard: if a fork happens at the exact moment one of those threads holds
+an internal lock (a Redis connection-pool lock, a logging lock, a DB pool
+lock - anything), the forked child inherits that lock already held, with
+no thread left alive in the child to ever release it - any code path in
+the child that later needs the same lock hangs forever, silently, with
+0% CPU and no error, no exception, no timeout ever firing (since the hang
+happens before the code even reaches the point a network-level timeout
+would apply). This looked identical to "a slow/unresponsive third-party
+API" from the outside, and *was* diagnosed as that at first - it took
+kernel-level forensics (0% CPU sustained for 2+ hours, `/proc/1/wchan`
+showing `do_wait`, near-zero container NET I/O, and - the actual smoking
+gun - a fresh ad-hoc request from the *exact same container* to the
+*exact same URL* completing in 1.1s while the RQ-dispatched job sat
+hung) to rule out the network/API and correctly place the fault in the
+job's own execution context. Confirmed real and reproducible: it happened
+twice in the same session, once during Moxfield commander resolution and
+once during the CubeCobra full scrape - two completely unrelated code
+paths, ruling out a bug specific to either feature and pointing at the
+shared execution mechanism instead. Fixed by switching
+`rq.Worker` -> `rq.SimpleWorker` (in-process, no fork) - verified live:
+after the fix, an immediate retry of both previously-hung jobs completed
+real, substantial work within minutes (a real Moxfield 429 rate-limit
+after 15 real pages - a *legitimate* rate limit this time, not a hang -
+and 2,700+ real cubes fetched across 79 real pages and still climbing).
+A related operational gotcha found recovering from this, twice: killing a
+`Worker` process abruptly (`docker stop`/container recreate) leaves a
+stale registration key in Redis (`rq:worker:<name>`) that a fresh worker
+process's `register_birth()` refuses to start under, crash-looping with
+`ValueError: There exists an active worker named '<name>' already` -
+recovery is `docker stop <container>` (let it fully stop first, don't
+race a restart against it), `redis-cli DEL rq:worker:<name>` (+ `SREM
+rq:workers <name>`), then start fresh. Neither the Moxfield 1,000-commander
+progress nor CubeCobra's cached cubes were lost across any of this - both
+are permanently committed incrementally, exactly the design each was
+built with.
+
+**Gotcha #39 - no `datetime` column in this project's schema is stored
+`timezone=True`, so every API-returned timestamp silently loses its UTC
+marker, and every frontend `new Date(...)` on one is parsed as *local*
+time instead - user-caught live, not found by me.** The user noticed the
+new full-scrape page's "elapsed" stat showing ~2 hours for a scrape that
+had only just started, asked directly whether it might be a timezone
+issue, and was right: `CubeFullScrapeState.started_at` (and every other
+plain `mapped_column()`-typed `datetime` column in this project) is
+written as a real, correct UTC value (`datetime.now(UTC)`) but Postgres's
+inferred column type is `TIMESTAMP WITHOUT TIME ZONE`, which silently
+drops the tzinfo on round-trip - confirmed live via a direct read:
+`state.started_at.tzinfo` is `None` even though the value is genuinely
+UTC. Pydantic then correctly (if unhelpfully) serializes that naive
+datetime with no `Z`/offset suffix, and `new Date("2026-08-12T20:55:49")`
+in a browser is parsed as *local* time, not UTC - inflating any elapsed-
+time math by exactly the viewer's local UTC offset (matches Europe/Zurich's
++2h summer offset exactly - almost certainly the same root cause behind
+an earlier, wrongly-dismissed "Europe/Zurich zeigt 2h weniger an" report
+from a previous session, mistaken then for raw debug-tool output rather
+than a real app bug). Confirmed live to be systemic, not a one-off: a
+project-wide grep found the same unguarded `new Date(apiValue)` pattern in
+8 more places across 6 more files (Discover, DiscoverCubes, ListDetail,
+Lists, Prices, Sources, SystemStatus) - all fixed together with a shared
+`frontend/src/utils/time.ts` `parseUtcTimestamp()` helper (appends `Z`
+before parsing when the string has no timezone suffix) rather than leaving
+6 more known-broken instances in place after finding the pattern. The
+*correct* full fix (adding `DateTime(timezone=True)` to every affected
+model column) is a larger, more invasive backend migration not done here -
+this fixes the actual user-visible symptom project-wide without that.
+
+**Gotcha #40 - the full-scrape's own upsert had the same unguarded
+"insert a string field wider than its column" hazard gotcha #34 already
+found and fixed once, and hit it live again at real scale.** Confirmed
+live: the real full scrape (post-SimpleWorker-fix) ran cleanly for ~34
+minutes, found a real 34,554 cubes across 1,133 real pages - genuinely
+deep into CubeCobra's catalog, far past the ~1,000-1,400-cube range the
+bounded, popularity-limited sync had ever reached before - then hit a
+real `psycopg.errors.StringDataRightTruncation` on `popular_cubes.name`
+(`String(256)`). Not a re-occurrence of gotcha #34's *specific* bug (that
+one was CSV column-shift corruption from an unescaped quote); this is the
+same *class* of bug for a different reason - a real cube's name or owner
+username can simply, legitimately be longer than the column allows, and
+only a deep-enough scrape was ever going to encounter one. Fixed the same
+way gotcha #34 did: a small `_truncate(value, max_length)` helper in
+`app.services.cube_discover_service`, applied to every string field in
+*both* the full-scrape's upsert and the regular bounded sync's own bulk
+insert (which has the identical unguarded shape and could hit the exact
+same crash if a popular-enough cube ever had a long enough name, even
+though it never happened to live) - "one overlong field truncates
+instead of aborting the whole batch," not "assume today's data shape
+holds forever." 2 new regression tests (one per insert path); 398 backend
+tests total; `ruff`, `mypy`, and the frontend `lint`/`build` are all
+clean. A resumed real scrape (idempotent by design - upserts by
+`external_id`, so re-walking from page 1 after a failure is always safe,
+never creates duplicates) was re-triggered live with the fix deployed -
+see the next entry for the real, confirmed outcome once it finishes (not
+asserted here in advance).
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key

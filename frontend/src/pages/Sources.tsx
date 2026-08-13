@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { apiGet, apiPostJson, ApiError } from "../api/client";
 import type { CardList } from "../types/lists";
+import { parseUtcTimestamp } from "../utils/time";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -90,7 +91,7 @@ export default function Sources() {
                     <td>
                       <span className={badgeClass(item)}>{statusLabel(item)}</span>
                     </td>
-                    <td>{item.last_refreshed_at ? new Date(item.last_refreshed_at).toLocaleString() : "—"}</td>
+                    <td>{item.last_refreshed_at ? new Date(parseUtcTimestamp(item.last_refreshed_at)).toLocaleString() : "—"}</td>
                     <td>
                       <button
                         className="cf-btn"

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { apiGet, apiPostJson, ApiError } from "../api/client";
 import type { ReadinessResponse } from "../types/health";
 import type { ScryfallSyncStatus } from "../types/scryfall";
+import { parseUtcTimestamp } from "../utils/time";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -98,7 +99,7 @@ export default function SystemStatus() {
             {scryfall.source_updated_at && (
               <p>
                 {t("health.scryfall.dataFrom")}{" "}
-                {new Date(scryfall.source_updated_at).toLocaleString()}
+                {new Date(parseUtcTimestamp(scryfall.source_updated_at)).toLocaleString()}
               </p>
             )}
             {scryfall.status === "FAILED" && scryfall.error_message && (

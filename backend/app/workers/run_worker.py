@@ -24,7 +24,7 @@ import threading
 import time
 
 from redis import Redis
-from rq import Queue, Worker
+from rq import Queue, SimpleWorker
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
@@ -110,7 +110,24 @@ def main() -> None:
         log.info("periodic Scryfall/MTGJSON sync disabled (CARDFORGE_PERIODIC_SYNC_ENABLED=false)")
 
     queues = [Queue(name, connection=conn) for name in QUEUE_NAMES]
-    worker = Worker(queues, connection=conn, name="cardforge-worker")
+    # SimpleWorker, not the default (forking) Worker: this process starts
+    # two background daemon threads above (staleness sweep, periodic data
+    # sync) that periodically do Redis/DB I/O. RQ's default Worker forks a
+    # child process per job - if that fork happens while one of those
+    # threads holds an internal lock (Redis connection-pool lock, logging
+    # lock, DB pool lock, etc.), the forked child inherits it permanently
+    # locked with no thread left alive to release it, hanging that job
+    # forever with 0% CPU and no error, ever - a classic "fork() is unsafe
+    # in a multi-threaded process" hazard. Confirmed live as the real cause
+    # of two separate real hangs in the same session (see CLAUDE.md) - a
+    # fresh, ad-hoc request from the very same container succeeded
+    # instantly while the RQ-dispatched job sat hung, ruling out a network/
+    # API-side explanation. SimpleWorker runs jobs in-process instead of
+    # forking, eliminating this failure class entirely; the trade-off (a
+    # job crash could in principle take the whole process down with it) is
+    # acceptable here since every job function already wraps its own DB
+    # session in try/finally and none of them are expected to segfault.
+    worker = SimpleWorker(queues, connection=conn, name="cardforge-worker")
     worker.work(with_scheduler=True)
 
 

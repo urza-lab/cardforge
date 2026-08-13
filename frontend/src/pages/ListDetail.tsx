@@ -7,6 +7,7 @@ import type { CardList, CardListItem, ListComparisonResponse } from "../types/li
 import type { ComparisonMode } from "../types/comparison";
 import type { UserSettings } from "../types/settings";
 import type { PriceProfile } from "../types/pricing";
+import { parseUtcTimestamp } from "../utils/time";
 
 const REFRESH_POLL_INTERVAL_MS = 3000;
 
@@ -286,7 +287,7 @@ export default function ListDetail() {
             )}
             {cardList.last_refreshed_at && (
               <span style={{ fontSize: 13, color: "var(--cf-muted)" }}>
-                {t("listDetailPage.lastRefreshed")} {new Date(cardList.last_refreshed_at).toLocaleString()}
+                {t("listDetailPage.lastRefreshed")} {new Date(parseUtcTimestamp(cardList.last_refreshed_at)).toLocaleString()}
               </span>
             )}
             <button

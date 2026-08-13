@@ -5,6 +5,7 @@ import { apiDelete, apiGet, apiPostJson, ApiError } from "../api/client";
 import { useSort } from "../hooks/useSort";
 import type { DashboardSummary } from "../types/dashboard";
 import type { CardList, ListType } from "../types/lists";
+import { parseUtcTimestamp } from "../utils/time";
 
 interface CardListRow extends CardList {
   coverage_percent: number | null;
@@ -290,7 +291,7 @@ export default function Lists() {
                         <Link to={`/lists/${item.id}`}>{item.name}</Link>
                       </td>
                       <td>{t(`listsPage.types.${item.list_type}`)}</td>
-                      <td>{new Date(item.created_at).toLocaleDateString()}</td>
+                      <td>{new Date(parseUtcTimestamp(item.created_at)).toLocaleDateString()}</td>
                       <td>{item.coverage_percent !== null ? `${item.coverage_percent.toFixed(0)}%` : "—"}</td>
                       <td>
                         {item.missing_cost !== null
