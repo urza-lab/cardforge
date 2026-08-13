@@ -122,6 +122,11 @@ def run_cube_discovery_sync(db: Session, settings: Settings | None = None) -> Cu
                         "tags": c.tags,
                         "num_decks": c.num_decks,
                         "date_last_updated": c.date_last_updated,
+                        "description": c.description,
+                        "featured": c.featured,
+                        "keywords": c.keywords,
+                        "version": c.version,
+                        "owner_follower_count": c.owner_follower_count,
                     }
                     for c in cubes
                 ],
@@ -238,6 +243,11 @@ def run_full_cube_scrape(db: Session, settings: Settings | None = None) -> CubeF
                             "tags": c.tags,
                             "num_decks": c.num_decks,
                             "date_last_updated": c.date_last_updated,
+                            "description": c.description,
+                            "featured": c.featured,
+                            "keywords": c.keywords,
+                            "version": c.version,
+                            "owner_follower_count": c.owner_follower_count,
                             "synced_at": now,
                         }
                         for c in page
@@ -255,6 +265,11 @@ def run_full_cube_scrape(db: Session, settings: Settings | None = None) -> CubeF
                         "tags": stmt.excluded.tags,
                         "num_decks": stmt.excluded.num_decks,
                         "date_last_updated": stmt.excluded.date_last_updated,
+                        "description": stmt.excluded.description,
+                        "featured": stmt.excluded.featured,
+                        "keywords": stmt.excluded.keywords,
+                        "version": stmt.excluded.version,
+                        "owner_follower_count": stmt.excluded.owner_follower_count,
                         "synced_at": stmt.excluded.synced_at,
                         # imported_list_id/import_error/import_attempted_at
                         # deliberately left untouched by this upsert - same
@@ -288,15 +303,38 @@ def run_full_cube_scrape(db: Session, settings: Settings | None = None) -> CubeF
     return state
 
 
-def list_popular_cubes(db: Session, *, sort: str = "likes") -> list[PopularCube]:
+def list_popular_cubes(
+    db: Session,
+    *,
+    sort: str = "likes",
+    has_description: bool | None = None,
+    featured: bool | None = None,
+    min_followers: int | None = None,
+) -> list[PopularCube]:
+    """`has_description`/`featured`/`min_followers` filter against the real
+    quality signals found live in CubeCobra's own search response (user-
+    requested, see PopularCube's own model comment) - deliberately kept as
+    filters over the *already fully-crawled* cache rather than ever
+    narrowing what the crawl itself fetches, so an obscure-but-real cube
+    (0 likes, real description) is never skipped just because it isn't
+    "popular" - only whether it's *shown* here is affected.
+    """
     order_column: InstrumentedAttribute[int] | InstrumentedAttribute[int | None]
     if sort == "cards":
         order_column = PopularCube.card_count
     elif sort == "decks":
         order_column = PopularCube.num_decks
+    elif sort == "followers":
+        order_column = PopularCube.owner_follower_count
     else:
         order_column = PopularCube.like_count
     stmt = select(PopularCube).order_by(order_column.desc().nulls_last())
+    if has_description is not None:
+        stmt = stmt.where(PopularCube.description.is_not(None) if has_description else PopularCube.description.is_(None))
+    if featured is not None:
+        stmt = stmt.where(PopularCube.featured == featured)
+    if min_followers is not None:
+        stmt = stmt.where(PopularCube.owner_follower_count >= min_followers)
     return list(db.scalars(stmt))
 
 

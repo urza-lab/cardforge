@@ -11,8 +11,16 @@ router = APIRouter(prefix="/api/cube-discover", tags=["cube-discover"])
 
 
 @router.get("/cubes", response_model=list[PopularCubeRead])
-def list_popular_cubes(sort: str = "likes", db: Session = Depends(get_db)) -> list[PopularCubeRead]:
-    cubes = cube_discover_service.list_popular_cubes(db, sort=sort)
+def list_popular_cubes(
+    sort: str = "likes",
+    has_description: bool | None = None,
+    featured: bool | None = None,
+    min_followers: int | None = None,
+    db: Session = Depends(get_db),
+) -> list[PopularCubeRead]:
+    cubes = cube_discover_service.list_popular_cubes(
+        db, sort=sort, has_description=has_description, featured=featured, min_followers=min_followers
+    )
     return [PopularCubeRead.model_validate(c) for c in cubes]
 
 

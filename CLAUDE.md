@@ -920,6 +920,44 @@ apply the migration - a reminder that model edits and their migration
 aren't atomic against a hot-reloading dev backend, even within the same
 few minutes of work.
 
+**Cube quality-signal filters, user-requested as a real alternative to a
+likeCount stop-threshold.** The user asked whether the full scrape could be
+"narrowed down" to popular/quality cubes - live data ruled out a stop-
+threshold outright (a spot-check at 150k+ cubes deep showed everything is
+still `likeCount: 0, numDecks: 0`, meaning a threshold would have ended
+the walk almost immediately, right after the original ~1,000-1,500
+"genuinely popular" cubes, defeating the entire reason this feature
+exists - reaching exactly the obscure-but-real cubes a popularity-bounded
+search can't). The better answer: keep the crawl itself unbounded and
+exhaustive, but capture real quality signals on every cube so the
+*browse* UI can filter efficiently instead. Dumping a *full* raw cube
+object (not just the subset already mapped) found real, previously-
+unused fields: `description` (CubeCobra has no separate `hasPrimer` flag
+the way Moxfield/Archidekt do, so a real non-empty description is the
+closest proxy for "the owner put in real effort" - confirmed live: "MTGO
+Vintage Cube" has one, the many auto-named "X's New Cube" entries deep in
+the crawl don't), `featured` (CubeCobra's own editorial flag), `keywords`
+(real author tags, distinct from the separate, usually-empty `tags`
+field), `version` (real edit count), and `owner.followerCount`. All five
+added as new `PopularCube` columns/filters/sort options
+(`has_description`, `featured`, `min_followers`, `sort=followers`), same
+shape as the Discover Decks attribute work earlier. 6 new backend tests
+(adapter-level extraction + defaults, API-level filter/sort); 408 backend
+tests total; `ruff`, `mypy`, and the frontend `lint`/`build` are all
+clean. Deployed by deliberately interrupting the in-progress full scrape
+again (167,289 real cubes in at the time) - safe this time specifically
+*because* the resume-cursor fix above already existed: verified live that
+the retriggered run resumed from deep, already-covered territory (the
+first newly-touched rows after resuming were all real `likeCount: 0`
+cubes, not the well-known top-popularity ones a page-1 restart would hit
+first) rather than re-walking from the start, and real `description`/
+`featured`/`owner_follower_count` values populated correctly on the newly
+-processed cubes. The ~167k cubes already stored before this deploy won't
+retroactively gain the new fields until a future full re-scan reaches
+them again (upserts touch whatever the crawl currently passes over, not
+retroactively) - an accepted, explained tradeoff of deploying mid-run
+rather than waiting for natural completion.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key

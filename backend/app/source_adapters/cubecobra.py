@@ -95,6 +95,17 @@ class PopularCubeEntry:
     # edited it on CubeCobra itself.
     num_decks: int | None
     date_last_updated: datetime | None
+    # Real quality signals for efficient filtering without narrowing the
+    # crawl itself - see PopularCube's own model comment for why (a
+    # likeCount/numDecks stop-threshold was considered and rejected, since
+    # it would skip exactly the obscure-but-real cubes this feature exists
+    # to reach). CubeCobra has no separate `hasPrimer` flag; a real,
+    # non-empty `description` is the closest real proxy.
+    description: str | None = None
+    featured: bool = False
+    keywords: list[str] | None = None
+    version: int | None = None
+    owner_follower_count: int | None = None
 
 
 def validate_url(url: str) -> bool:
@@ -183,11 +194,12 @@ def _map_cube_entry(c: dict[str, Any]) -> PopularCubeEntry | None:
         return None
     short_id = c.get("shortId") or cube_id
     date_last_updated_ms = c.get("dateLastUpdated")
+    owner = c.get("owner") or {}
     return PopularCubeEntry(
         external_id=str(cube_id),
         short_id=str(short_id),
         name=c.get("name") or "(untitled)",
-        owner_username=(c.get("owner") or {}).get("username"),
+        owner_username=owner.get("username"),
         source_url=f"https://cubecobra.com/cube/list/{short_id}",
         card_count=c.get("cardCount") or 0,
         like_count=c.get("likeCount") or 0,
@@ -196,6 +208,11 @@ def _map_cube_entry(c: dict[str, Any]) -> PopularCubeEntry | None:
         date_last_updated=(
             datetime.fromtimestamp(date_last_updated_ms / 1000, tz=UTC) if date_last_updated_ms else None
         ),
+        description=c.get("description") or None,
+        featured=bool(c.get("featured", False)),
+        keywords=c.get("keywords") or None,
+        version=c.get("version"),
+        owner_follower_count=owner.get("followerCount"),
     )
 
 

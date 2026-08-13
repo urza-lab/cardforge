@@ -35,7 +35,10 @@ export default function DiscoverCubes() {
 
   const [cubes, setCubes] = useState<PopularCube[] | null>(null);
   const [cubesError, setCubesError] = useState<string | null>(null);
-  const [sort, setSort] = useState<"likes" | "cards" | "decks">("likes");
+  const [sort, setSort] = useState<"likes" | "cards" | "decks" | "followers">("likes");
+  const [hasDescriptionFilter, setHasDescriptionFilter] = useState<"" | "true" | "false">("");
+  const [featuredFilter, setFeaturedFilter] = useState(false);
+  const [minFollowers, setMinFollowers] = useState("");
 
   // Only tracks "a request is in flight right now" - the actual outcome
   // (imported_list_id / import_error) lives on the cube itself, returned
@@ -118,13 +121,17 @@ export default function DiscoverCubes() {
   };
 
   const fetchCubes = () => {
-    apiGet<PopularCube[]>(`/cube-discover/cubes?sort=${sort}`)
+    const params = new URLSearchParams({ sort });
+    if (hasDescriptionFilter) params.set("has_description", hasDescriptionFilter);
+    if (featuredFilter) params.set("featured", "true");
+    if (minFollowers.trim()) params.set("min_followers", minFollowers.trim());
+    apiGet<PopularCube[]>(`/cube-discover/cubes?${params.toString()}`)
       .then(setCubes)
       .catch((err: unknown) => setCubesError(err instanceof ApiError ? err.message : String(err)));
   };
 
   useEffect(fetchStatus, []);
-  useEffect(fetchCubes, [sort]);
+  useEffect(fetchCubes, [sort, hasDescriptionFilter, featuredFilter, minFollowers]);
 
   useEffect(() => {
     setSelected((prev) => {
@@ -365,12 +372,48 @@ export default function DiscoverCubes() {
         <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "flex-end", gap: 10 }}>
           <div>
             <label htmlFor="dc-sort">{t("discoverPage.sortBy")}</label>
-            <select id="dc-sort" className="cf-select" value={sort} onChange={(e) => setSort(e.target.value as "likes" | "cards" | "decks")}>
+            <select
+              id="dc-sort"
+              className="cf-select"
+              value={sort}
+              onChange={(e) => setSort(e.target.value as "likes" | "cards" | "decks" | "followers")}
+            >
               <option value="likes">{t("discoverCubesPage.sortLikes")}</option>
               <option value="cards">{t("discoverCubesPage.sortCards")}</option>
               <option value="decks">{t("discoverCubesPage.sortDecks")}</option>
+              <option value="followers">{t("discoverCubesPage.sortFollowers")}</option>
             </select>
           </div>
+          <div>
+            <label htmlFor="dc-has-description">{t("discoverCubesPage.hasDescriptionFilter")}</label>
+            <select
+              id="dc-has-description"
+              className="cf-select"
+              value={hasDescriptionFilter}
+              onChange={(e) => setHasDescriptionFilter(e.target.value as "" | "true" | "false")}
+            >
+              <option value="">{t("discoverCubesPage.hasDescriptionAny")}</option>
+              <option value="true">{t("discoverCubesPage.hasDescriptionYes")}</option>
+              <option value="false">{t("discoverCubesPage.hasDescriptionNo")}</option>
+            </select>
+          </div>
+          <div>
+            <label htmlFor="dc-min-followers">{t("discoverCubesPage.minFollowers")}</label>
+            <input
+              id="dc-min-followers"
+              className="cf-input"
+              style={{ width: 100 }}
+              type="number"
+              min={0}
+              value={minFollowers}
+              onChange={(e) => setMinFollowers(e.target.value)}
+              placeholder={t("discoverCubesPage.minFollowersAny")}
+            />
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, paddingBottom: 8 }}>
+            <input type="checkbox" checked={featuredFilter} onChange={(e) => setFeaturedFilter(e.target.checked)} />
+            {t("discoverCubesPage.featuredFilter")}
+          </label>
         </div>
 
         {cubesError && <div className="cf-alert cf-alert-error">{cubesError}</div>}
@@ -405,6 +448,7 @@ export default function DiscoverCubes() {
                     </th>
                     <th>{t("comparisonsPage.columns.name")}</th>
                     <th>{t("discoverCubesPage.columns.owner")}</th>
+                    <th>{t("discoverCubesPage.columns.followers")}</th>
                     <th>{t("discoverCubesPage.columns.cards")}</th>
                     <th>{t("discoverPage.columns.likes")}</th>
                     <th>{t("discoverCubesPage.columns.decks")}</th>
@@ -427,11 +471,22 @@ export default function DiscoverCubes() {
                           />
                         </td>
                         <td>
-                          <a href={cube.source_url} target="_blank" rel="noreferrer">
+                          <a
+                            href={cube.source_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={cube.description ?? undefined}
+                          >
                             {cube.name}
                           </a>
+                          {cube.featured && (
+                            <span className="cf-badge cf-badge-ok" style={{ marginLeft: 6 }}>
+                              {t("discoverCubesPage.featuredBadge")}
+                            </span>
+                          )}
                         </td>
                         <td>{cube.owner_username ?? "—"}</td>
+                        <td>{cube.owner_follower_count !== null ? cube.owner_follower_count.toLocaleString() : "—"}</td>
                         <td>{cube.card_count}</td>
                         <td>{cube.like_count.toLocaleString()}</td>
                         <td>{cube.num_decks !== null ? cube.num_decks.toLocaleString() : "—"}</td>

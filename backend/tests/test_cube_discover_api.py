@@ -107,6 +107,42 @@ def test_list_cubes_sorted_by_likes_and_cards():
     assert [c["name"] for c in by_cards] == ["A", "B"]
 
 
+def test_list_cubes_has_description_filter():
+    _seed_cube(external_id="a", name="Real Cube", description="A real cube description.")
+    _seed_cube(external_id="b", name="Bare Cube", description=None)
+
+    resp = client.get("/api/cube-discover/cubes?has_description=true").json()
+    assert [c["name"] for c in resp] == ["Real Cube"]
+
+    resp2 = client.get("/api/cube-discover/cubes?has_description=false").json()
+    assert [c["name"] for c in resp2] == ["Bare Cube"]
+
+
+def test_list_cubes_featured_filter():
+    _seed_cube(external_id="a", name="Featured Cube", featured=True)
+    _seed_cube(external_id="b", name="Regular Cube", featured=False)
+
+    resp = client.get("/api/cube-discover/cubes?featured=true").json()
+    assert [c["name"] for c in resp] == ["Featured Cube"]
+
+
+def test_list_cubes_min_followers_filter():
+    _seed_cube(external_id="a", name="Popular Owner", owner_follower_count=200)
+    _seed_cube(external_id="b", name="Small Owner", owner_follower_count=5)
+    _seed_cube(external_id="c", name="Unknown Owner", owner_follower_count=None)
+
+    resp = client.get("/api/cube-discover/cubes?min_followers=100").json()
+    assert [c["name"] for c in resp] == ["Popular Owner"]
+
+
+def test_list_cubes_sorted_by_followers():
+    _seed_cube(external_id="a", name="A", owner_follower_count=5)
+    _seed_cube(external_id="b", name="B", owner_follower_count=500)
+
+    resp = client.get("/api/cube-discover/cubes?sort=followers").json()
+    assert [c["name"] for c in resp] == ["B", "A"]
+
+
 def test_import_cube_success(monkeypatch: pytest.MonkeyPatch):
     cube = _seed_cube(external_id="import-me", name="Import Me")
     monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result())

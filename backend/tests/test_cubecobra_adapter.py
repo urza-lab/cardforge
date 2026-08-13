@@ -151,6 +151,48 @@ def test_fetch_popular_cubes_paginates_via_last_key(monkeypatch: pytest.MonkeyPa
     assert cubes[1].tags is None
 
 
+def test_fetch_popular_cubes_extracts_quality_signal_fields(monkeypatch: pytest.MonkeyPatch):
+    """User-requested: filter Discover Cubes by real quality signals
+    without narrowing the crawl itself - see PopularCube's own model
+    comment for why a likeCount/numDecks stop-threshold was rejected.
+    CubeCobra has no separate hasPrimer flag, so a real description is
+    the closest proxy for "the owner put in real effort."
+    """
+    monkeypatch.setattr(cubecobra.time, "sleep", lambda *_: None)
+    cube = {
+        "id": "abc-1", "shortId": "topcube", "name": "Top Cube", "owner": {"username": "Alice", "followerCount": 176},
+        "cardCount": 360, "likeCount": 500, "tags": ["legacy"],
+        "description": "A real cube description.", "featured": True, "keywords": ["vintage", "cube"], "version": 9,
+    }
+    monkeypatch.setattr(cubecobra.httpx, "post", lambda *a, **k: _search_response([cube], last_key=None))
+
+    cubes = cubecobra.fetch_popular_cubes("test-agent", pages=5)
+
+    assert len(cubes) == 1
+    entry = cubes[0]
+    assert entry.description == "A real cube description."
+    assert entry.featured is True
+    assert entry.keywords == ["vintage", "cube"]
+    assert entry.version == 9
+    assert entry.owner_follower_count == 176
+
+
+def test_fetch_popular_cubes_quality_signals_default_sensibly_when_absent(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(cubecobra.time, "sleep", lambda *_: None)
+    cube = {"id": "abc-1", "shortId": "topcube", "name": "Bare Cube", "owner": {"username": "Alice"}}
+    monkeypatch.setattr(cubecobra.httpx, "post", lambda *a, **k: _search_response([cube], last_key=None))
+
+    cubes = cubecobra.fetch_popular_cubes("test-agent", pages=5)
+
+    assert len(cubes) == 1
+    entry = cubes[0]
+    assert entry.description is None
+    assert entry.featured is False
+    assert entry.keywords is None
+    assert entry.version is None
+    assert entry.owner_follower_count is None
+
+
 def test_fetch_popular_cubes_raises_on_non_200(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(cubecobra.time, "sleep", lambda *_: None)
     monkeypatch.setattr(

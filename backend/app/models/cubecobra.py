@@ -52,6 +52,24 @@ class PopularCube(Base):
     date_last_updated: Mapped[datetime | None] = mapped_column()
     synced_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
+    # Real quality signals user-requested for efficient filtering *without*
+    # narrowing the crawl itself (a likeCount/numDecks stop-threshold was
+    # considered and rejected live - confirmed real data at 150k+ cubes deep
+    # showed everything is still 0-like/0-deck there, meaning a threshold
+    # would have skipped exactly the obscure-but-real cubes this whole
+    # feature exists to reach). Found by dumping a full raw cube object
+    # (not just the subset already mapped above) - CubeCobra has no
+    # separate `hasPrimer` flag the way Moxfield/Archidekt do, so a real,
+    # non-empty `description` is the closest equivalent proxy for "the
+    # owner put in real effort," confirmed live (a real cube like "MTGO
+    # Vintage Cube" has a real description; the "X's New Cube"-named,
+    # 0-like/0-deck cubes deep in the crawl have none).
+    description: Mapped[str | None] = mapped_column(Text)
+    featured: Mapped[bool] = mapped_column(default=False)
+    keywords: Mapped[list[str] | None] = mapped_column(JSONB)
+    version: Mapped[int | None] = mapped_column(Integer)
+    owner_follower_count: Mapped[int | None] = mapped_column(Integer)
+
     # Server-side import tracking (user-requested) - a browse page reload
     # or a routine resync must not lose "already imported"/"failed, retry"
     # state the way ephemeral React state did before. ON DELETE SET NULL:

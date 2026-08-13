@@ -34,4 +34,9 @@ export interface PopularCube {
   imported_list_id: number | null;
   import_error: string | null;
   import_attempted_at: string | null;
+  description: string | null;
+  featured: boolean;
+  keywords: string[] | null;
+  version: number | null;
+  owner_follower_count: number | null;
 }

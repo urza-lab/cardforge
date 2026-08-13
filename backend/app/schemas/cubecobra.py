@@ -43,3 +43,8 @@ class PopularCubeRead(BaseModel):
     imported_list_id: int | None
     import_error: str | None
     import_attempted_at: datetime | None
+    description: str | None
+    featured: bool
+    keywords: list[str] | None
+    version: int | None
+    owner_follower_count: int | None
