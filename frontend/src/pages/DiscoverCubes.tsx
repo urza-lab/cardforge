@@ -39,6 +39,14 @@ export default function DiscoverCubes() {
   const [hasDescriptionFilter, setHasDescriptionFilter] = useState<"" | "true" | "false">("");
   const [featuredFilter, setFeaturedFilter] = useState(false);
   const [minFollowers, setMinFollowers] = useState("");
+  // Defaults to a real, non-empty floor rather than "no filter" - user-
+  // asked directly what good an unplayable cube is, and real data backs
+  // that up: 6.6% of the entire real cache has exactly 1 card (see
+  // CLAUDE.md). 40 is a deliberately low bar (keeps legitimate small/
+  // "battle box" cubes, only excludes the clearly-broken near-empty
+  // entries) - still user-editable/clearable to see everything.
+  const [minCardCount, setMinCardCount] = useState("40");
+  const [maxCardCount, setMaxCardCount] = useState("");
 
   // Only tracks "a request is in flight right now" - the actual outcome
   // (imported_list_id / import_error) lives on the cube itself, returned
@@ -125,13 +133,15 @@ export default function DiscoverCubes() {
     if (hasDescriptionFilter) params.set("has_description", hasDescriptionFilter);
     if (featuredFilter) params.set("featured", "true");
     if (minFollowers.trim()) params.set("min_followers", minFollowers.trim());
+    if (minCardCount.trim()) params.set("min_card_count", minCardCount.trim());
+    if (maxCardCount.trim()) params.set("max_card_count", maxCardCount.trim());
     apiGet<PopularCube[]>(`/cube-discover/cubes?${params.toString()}`)
       .then(setCubes)
       .catch((err: unknown) => setCubesError(err instanceof ApiError ? err.message : String(err)));
   };
 
   useEffect(fetchStatus, []);
-  useEffect(fetchCubes, [sort, hasDescriptionFilter, featuredFilter, minFollowers]);
+  useEffect(fetchCubes, [sort, hasDescriptionFilter, featuredFilter, minFollowers, minCardCount, maxCardCount]);
 
   useEffect(() => {
     setSelected((prev) => {
@@ -410,11 +420,38 @@ export default function DiscoverCubes() {
               placeholder={t("discoverCubesPage.minFollowersAny")}
             />
           </div>
+          <div>
+            <label htmlFor="dc-min-cards">{t("discoverCubesPage.minCardCount")}</label>
+            <input
+              id="dc-min-cards"
+              className="cf-input"
+              style={{ width: 100 }}
+              type="number"
+              min={0}
+              value={minCardCount}
+              onChange={(e) => setMinCardCount(e.target.value)}
+              placeholder={t("discoverCubesPage.cardCountAny")}
+            />
+          </div>
+          <div>
+            <label htmlFor="dc-max-cards">{t("discoverCubesPage.maxCardCount")}</label>
+            <input
+              id="dc-max-cards"
+              className="cf-input"
+              style={{ width: 100 }}
+              type="number"
+              min={0}
+              value={maxCardCount}
+              onChange={(e) => setMaxCardCount(e.target.value)}
+              placeholder={t("discoverCubesPage.cardCountAny")}
+            />
+          </div>
           <label style={{ display: "flex", alignItems: "center", gap: 6, paddingBottom: 8 }}>
             <input type="checkbox" checked={featuredFilter} onChange={(e) => setFeaturedFilter(e.target.checked)} />
             {t("discoverCubesPage.featuredFilter")}
           </label>
         </div>
+        <p style={{ fontSize: 12, color: "var(--cf-muted)" }}>{t("discoverCubesPage.minCardCountHint")}</p>
 
         {cubesError && <div className="cf-alert cf-alert-error">{cubesError}</div>}
         {!cubes && !cubesError && <p>{t("common.loading")}</p>}

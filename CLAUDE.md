@@ -958,6 +958,47 @@ them again (upserts touch whatever the crawl currently passes over, not
 retroactively) - an accepted, explained tradeoff of deploying mid-run
 rather than waiting for natural completion.
 
+**`min_card_count`/`max_card_count` filter, added after live data showed
+`has_description` wasn't the reliable junk signal it looked like.** Asked
+directly whether the ~200k accumulated cubes needed cleanup - real
+analysis (not a guess) found the database itself is fine as-is (no
+deletion warranted, it's real accurate data, cheap to keep) but the
+*browse* UI would benefit from a real size filter: 6.6% of the entire
+cache (13,196 real cubes) has exactly 1 card - clearly broken/placeholder
+entries - while `has_description` turned out to be a poor filter on its
+own (97% of *all* cubes, real ones included, have no description; most
+real cube owners just don't write one). Real distribution confirmed live:
+median 360 cards (the actual MTG-community "standard cube" size), with
+360/540/180/450 as the most common real exact sizes. `min_card_count`/
+`max_card_count` added as a plain numeric range filter over the existing
+(already fully-crawled, never narrowed) cache - no migration needed, pure
+read-path change. 3 new backend tests; 411 backend tests total; `ruff`,
+`mypy`, and the frontend `lint`/`build` are all clean. Deployed without
+touching the worker at all (a read-filter change never needs the crawl
+process itself) - the in-progress full scrape was completely unaffected,
+confirmed live via its unchanged container start time and continuous
+progress across the deploy. Immediately followed by a direct user
+question ("what good are unplayable cubes") that made the filter's
+*default* the real remaining gap - `min_card_count` shipped defaulting to
+an empty/unfiltered field, meaning the real 1-card junk cluster would
+still show up unless a user proactively filtered it out. Changed the
+frontend default to `40` (still user-clearable to see everything) with an
+explanatory hint, closing the loop on the same finding rather than leaving
+the fix opt-in only.
+
+**The full CubeCobra scrape reached genuine completion for the first time
+in this session, live-confirmed.** After gotchas #38-41's fixes (worker
+fork/thread deadlock, timezone display, insert truncation, transient-
+request retry, resume cursor), the sixth real attempt ran end-to-end
+without a single failure: resumed from the deliberate mid-run interruption
+for the quality-signal-fields deploy, then walked all the way to
+CubeCobra's own real `lastKey` cursor running out - `status: COMPLETED`,
+not another `FAILED`. Real final scale: see the database's own live count
+at completion time for the authoritative total (deliberately not restated
+here as a fixed number, since it changes with the next real sync -
+CLAUDE.md's own "no fake success" principle applies to documentation too,
+not just the app).
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key

@@ -143,6 +143,36 @@ def test_list_cubes_sorted_by_followers():
     assert [c["name"] for c in resp] == ["B", "A"]
 
 
+def test_list_cubes_min_card_count_filter():
+    """Real, live-confirmed junk cluster: 6.6% of the real cache has
+    exactly 1 card - clearly broken/placeholder entries. A much more
+    reliable "is this junk" signal than has_description, which 97% of
+    *all* cubes (real ones included) lack.
+    """
+    _seed_cube(external_id="a", name="Real Cube", card_count=360)
+    _seed_cube(external_id="b", name="Junk Cube", card_count=1)
+
+    resp = client.get("/api/cube-discover/cubes?min_card_count=40").json()
+    assert [c["name"] for c in resp] == ["Real Cube"]
+
+
+def test_list_cubes_max_card_count_filter():
+    _seed_cube(external_id="a", name="Small Cube", card_count=180)
+    _seed_cube(external_id="b", name="Huge Cube", card_count=71000)
+
+    resp = client.get("/api/cube-discover/cubes?max_card_count=720").json()
+    assert [c["name"] for c in resp] == ["Small Cube"]
+
+
+def test_list_cubes_card_count_range_filter():
+    _seed_cube(external_id="a", name="Too Small", card_count=10)
+    _seed_cube(external_id="b", name="Just Right", card_count=360)
+    _seed_cube(external_id="c", name="Too Big", card_count=1000)
+
+    resp = client.get("/api/cube-discover/cubes?min_card_count=180&max_card_count=720").json()
+    assert [c["name"] for c in resp] == ["Just Right"]
+
+
 def test_import_cube_success(monkeypatch: pytest.MonkeyPatch):
     cube = _seed_cube(external_id="import-me", name="Import Me")
     monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result())

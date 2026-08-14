@@ -310,14 +310,22 @@ def list_popular_cubes(
     has_description: bool | None = None,
     featured: bool | None = None,
     min_followers: int | None = None,
+    min_card_count: int | None = None,
+    max_card_count: int | None = None,
 ) -> list[PopularCube]:
-    """`has_description`/`featured`/`min_followers` filter against the real
-    quality signals found live in CubeCobra's own search response (user-
-    requested, see PopularCube's own model comment) - deliberately kept as
-    filters over the *already fully-crawled* cache rather than ever
-    narrowing what the crawl itself fetches, so an obscure-but-real cube
-    (0 likes, real description) is never skipped just because it isn't
-    "popular" - only whether it's *shown* here is affected.
+    """`has_description`/`featured`/`min_followers`/`min_card_count`/
+    `max_card_count` filter against real signals found live in CubeCobra's
+    own search response (user-requested, see PopularCube's own model
+    comment) - deliberately kept as filters over the *already fully-
+    crawled* cache rather than ever narrowing what the crawl itself
+    fetches, so an obscure-but-real cube (0 likes, small niche cube size)
+    is never skipped just because it isn't "popular" - only whether it's
+    *shown* here is affected. `min_card_count` in particular targets a
+    real, live-confirmed junk cluster: 6.6% of the real cache (13,196
+    cubes) has exactly 1 card - clearly broken/placeholder entries, not
+    real cubes - a much more reliable "is this junk" signal than
+    `has_description` turned out to be (97% of *all* cubes, including
+    plenty of real ones, have no description at all).
     """
     order_column: InstrumentedAttribute[int] | InstrumentedAttribute[int | None]
     if sort == "cards":
@@ -335,6 +343,10 @@ def list_popular_cubes(
         stmt = stmt.where(PopularCube.featured == featured)
     if min_followers is not None:
         stmt = stmt.where(PopularCube.owner_follower_count >= min_followers)
+    if min_card_count is not None:
+        stmt = stmt.where(PopularCube.card_count >= min_card_count)
+    if max_card_count is not None:
+        stmt = stmt.where(PopularCube.card_count <= max_card_count)
     return list(db.scalars(stmt))
 
 

@@ -16,10 +16,18 @@ def list_popular_cubes(
     has_description: bool | None = None,
     featured: bool | None = None,
     min_followers: int | None = None,
+    min_card_count: int | None = None,
+    max_card_count: int | None = None,
     db: Session = Depends(get_db),
 ) -> list[PopularCubeRead]:
     cubes = cube_discover_service.list_popular_cubes(
-        db, sort=sort, has_description=has_description, featured=featured, min_followers=min_followers
+        db,
+        sort=sort,
+        has_description=has_description,
+        featured=featured,
+        min_followers=min_followers,
+        min_card_count=min_card_count,
+        max_card_count=max_card_count,
     )
     return [PopularCubeRead.model_validate(c) for c in cubes]
 
