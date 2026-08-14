@@ -343,6 +343,8 @@
     "maxCardCount": "Max. cards",
     "cardCountAny": "Any",
     "minCardCountHint": "Defaults to hiding cubes under 40 cards — a real chunk of the cache is broken/placeholder entries with just 1-2 cards. Clear the field to see everything.",
+    "limit": "Show",
+    "limitHint": "The cache can hold hundreds of thousands of cubes — this caps how many of the current sort/filter are shown at once, not how many are stored.",
     "featuredFilter": "Featured only",
     "featuredBadge": "Featured",
     "empty": "No popular cubes cached yet — click \"Sync now\" above.",
@@ -353,8 +355,8 @@
     "retryingAll": "Retrying {{done}} / {{total}}… {{eta}}",
     "etaSeconds": "(~{{seconds}}s left)",
     "fullScrape": {
-      "title": "Full cube import",
-      "description": "The regular sync above only reaches cubes near the top of CubeCobra's own popularity ranking (however many pages deep it goes) — an obscure, unliked cube can never be reached that way, no matter how deep. This instead walks CubeCobra's real catalog to genuine exhaustion, pulling in everything it can. There's no reliable way to know the real total in advance, so no ETA is shown — just what's been found so far and how fast it's going.",
+      "title": "Full catalog scan",
+      "description": "The regular sync above only reaches cubes near the top of CubeCobra's own popularity ranking (however many pages deep it goes) — an obscure, unliked cube can never be reached that way, no matter how deep. This instead walks CubeCobra's real catalog to genuine exhaustion, caching everything it can find so it's browsable and filterable below. It does not import anything into your own Decks & Cubes — that only happens when you click Import on a specific cube. There's no reliable way to know the real total in advance, so no ETA is shown — just what's been found so far and how fast it's going.",
       "start": "Start full scrape",
       "status": {
         "INACTIVE": "Not run yet",

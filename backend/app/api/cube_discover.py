@@ -18,6 +18,7 @@ def list_popular_cubes(
     min_followers: int | None = None,
     min_card_count: int | None = None,
     max_card_count: int | None = None,
+    limit: int = cube_discover_service.DEFAULT_LIST_LIMIT,
     db: Session = Depends(get_db),
 ) -> list[PopularCubeRead]:
     cubes = cube_discover_service.list_popular_cubes(
@@ -28,6 +29,7 @@ def list_popular_cubes(
         min_followers=min_followers,
         min_card_count=min_card_count,
         max_card_count=max_card_count,
+        limit=limit,
     )
     return [PopularCubeRead.model_validate(c) for c in cubes]
 

@@ -303,6 +303,10 @@ def run_full_cube_scrape(db: Session, settings: Settings | None = None) -> CubeF
     return state
 
 
+DEFAULT_LIST_LIMIT = 100
+MAX_LIST_LIMIT = 1000
+
+
 def list_popular_cubes(
     db: Session,
     *,
@@ -312,6 +316,7 @@ def list_popular_cubes(
     min_followers: int | None = None,
     min_card_count: int | None = None,
     max_card_count: int | None = None,
+    limit: int = DEFAULT_LIST_LIMIT,
 ) -> list[PopularCube]:
     """`has_description`/`featured`/`min_followers`/`min_card_count`/
     `max_card_count` filter against real signals found live in CubeCobra's
@@ -347,6 +352,13 @@ def list_popular_cubes(
         stmt = stmt.where(PopularCube.card_count >= min_card_count)
     if max_card_count is not None:
         stmt = stmt.where(PopularCube.card_count <= max_card_count)
+    # Real bug found live, user-reported browser out-of-memory: this
+    # endpoint had no limit at all, fine while the cache was ~1,000-18,000
+    # rows but the full-catalog scrape (see run_full_cube_scrape) grew it to
+    # 200,000+ - returning every matching row as one JSON payload into an
+    # unvirtualized frontend table crashed the tab. A browse UI never needs
+    # more than a bounded top-N of the current sort anyway.
+    stmt = stmt.limit(min(limit, MAX_LIST_LIMIT))
     return list(db.scalars(stmt))
 
 

@@ -173,6 +173,24 @@ def test_list_cubes_card_count_range_filter():
     assert [c["name"] for c in resp] == ["Just Right"]
 
 
+def test_list_cubes_defaults_to_a_bounded_limit():
+    """Real bug, user-reported (browser out-of-memory / infinite loading):
+    this endpoint used to return every matching row with no cap at all -
+    fine while the cache held a few thousand cubes, but the full-catalog
+    scrape grew it past 200,000, and shipping that many rows as one JSON
+    payload into an unvirtualized frontend table crashed the tab. See
+    CLAUDE.md.
+    """
+    for i in range(5):
+        _seed_cube(external_id=f"bounded-{i}", name=f"Bounded {i}", card_count=200)
+
+    resp = client.get("/api/cube-discover/cubes?limit=2").json()
+    assert len(resp) == 2
+
+    resp_over_max = client.get("/api/cube-discover/cubes?limit=999999").json()
+    assert len(resp_over_max) == 5  # capped server-side, but never crashes/errors
+
+
 def test_import_cube_success(monkeypatch: pytest.MonkeyPatch):
     cube = _seed_cube(external_id="import-me", name="Import Me")
     monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result())

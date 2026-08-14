@@ -47,6 +47,13 @@ export default function DiscoverCubes() {
   // entries) - still user-editable/clearable to see everything.
   const [minCardCount, setMinCardCount] = useState("40");
   const [maxCardCount, setMaxCardCount] = useState("");
+  // Real bug, user-reported (browser out-of-memory / infinite loading): the
+  // list endpoint used to return every matching row with no cap - fine at
+  // ~1,000-18,000 cached cubes, but the full-catalog scrape grew the cache
+  // past 200,000, and rendering that many rows in one unvirtualized table
+  // crashed the tab. Server now caps at `limit`; this is a plain browse
+  // top-N, not pagination through the whole cache.
+  const [limit, setLimit] = useState("100");
 
   // Only tracks "a request is in flight right now" - the actual outcome
   // (imported_list_id / import_error) lives on the cube itself, returned
@@ -135,13 +142,14 @@ export default function DiscoverCubes() {
     if (minFollowers.trim()) params.set("min_followers", minFollowers.trim());
     if (minCardCount.trim()) params.set("min_card_count", minCardCount.trim());
     if (maxCardCount.trim()) params.set("max_card_count", maxCardCount.trim());
+    params.set("limit", limit);
     apiGet<PopularCube[]>(`/cube-discover/cubes?${params.toString()}`)
       .then(setCubes)
       .catch((err: unknown) => setCubesError(err instanceof ApiError ? err.message : String(err)));
   };
 
   useEffect(fetchStatus, []);
-  useEffect(fetchCubes, [sort, hasDescriptionFilter, featuredFilter, minFollowers, minCardCount, maxCardCount]);
+  useEffect(fetchCubes, [sort, hasDescriptionFilter, featuredFilter, minFollowers, minCardCount, maxCardCount, limit]);
 
   useEffect(() => {
     setSelected((prev) => {
@@ -450,8 +458,19 @@ export default function DiscoverCubes() {
             <input type="checkbox" checked={featuredFilter} onChange={(e) => setFeaturedFilter(e.target.checked)} />
             {t("discoverCubesPage.featuredFilter")}
           </label>
+          <div>
+            <label htmlFor="dc-limit">{t("discoverCubesPage.limit")}</label>
+            <select id="dc-limit" className="cf-select" value={limit} onChange={(e) => setLimit(e.target.value)}>
+              <option value="50">50</option>
+              <option value="100">100</option>
+              <option value="200">200</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+            </select>
+          </div>
         </div>
         <p style={{ fontSize: 12, color: "var(--cf-muted)" }}>{t("discoverCubesPage.minCardCountHint")}</p>
+        <p style={{ fontSize: 12, color: "var(--cf-muted)" }}>{t("discoverCubesPage.limitHint")}</p>
 
         {cubesError && <div className="cf-alert cf-alert-error">{cubesError}</div>}
         {!cubes && !cubesError && <p>{t("common.loading")}</p>}

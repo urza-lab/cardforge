@@ -997,7 +997,49 @@ not another `FAILED`. Real final scale: see the database's own live count
 at completion time for the authoritative total (deliberately not restated
 here as a fixed number, since it changes with the next real sync -
 CLAUDE.md's own "no fake success" principle applies to documentation too,
-not just the app).
+not just the app). Real final count, verified live once the user asked:
+**206,459 cubes** in `popular_cubes` - of which 175,740 pass the default
+`min_card_count=40` browse filter (30,719 are the sub-40-card junk
+cluster). Only 21,099 of the 206,459 have `like_count > 0` at all - the
+other 185,360 (154,761 of them real/playable by the card-count filter)
+were only reachable via this unbounded full scrape, never via the old
+popularity-bounded sync, which is the concrete payoff the user asked
+about directly (this Discover Cubes *browse pool* is separate from actual
+imports - `CardList` rows only get created when a specific cube is
+imported, one at a time or via bulk-select; the pool being 206k doesn't
+mean 206k lists exist).
+
+**Gotcha #42 - growing the Discover Cubes cache past ~200k rows turned a
+previously-fine unbounded list endpoint into a real, user-reported browser
+crash.** `GET /api/cube-discover/cubes` (`cube_discover_service.
+list_popular_cubes`) had no `LIMIT` at all since the feature was first
+built, when the cache only ever held ~1,000-18,000 rows - never enough to
+matter. Once the full-catalog scrape (gotchas #38-41) pushed it past
+200,000, the same endpoint started shipping the *entire* filtered result
+set as one JSON response into `DiscoverCubes.tsx`'s plain, unvirtualized
+`<table>`, which the user confirmed live crashed their browser tab with an
+out-of-memory error (and hung indefinitely on mobile, never finishing the
+render). Fixed with a real server-side `limit` param
+(`DEFAULT_LIST_LIMIT=100`, `MAX_LIST_LIMIT=1000` hard cap regardless of
+what's requested) plus a "Show" dropdown (50/100/200/500/1000) in the UI -
+a browse page over a sort/filter never needs more than a bounded top-N
+rendered at once, unlike the Dashboard's `useRowLimit` pattern (which
+slices an already-small, already-computed-server-side aggregate, not a
+200k-row raw table - the two look similar in the UI but solve different
+problems, this one needed a real server-side cap, not just a client-side
+slice of an already-fetched array). Also renamed the section's misleading
+"Full cube import" title to "Full catalog scan" (also caught in the same
+report, unprompted) - the full-scrape only crawls/caches CubeCobra's
+catalog into the browsable pool above; it does not import anything into
+the user's own Decks & Cubes, that's a separate explicit per-cube (or
+bulk-select) action, and the old title conflated the two. 1 new regression
+test (`test_list_cubes_defaults_to_a_bounded_limit`); 412 backend tests
+total; `ruff`, `mypy`, and the frontend `lint`/`build` are all clean.
+Verified live through the real nginx proxy: the default request now
+returns exactly 100 rows in ~0.3s (down from an unbounded, tab-crashing
+payload), `?limit=500`/`?limit=1000` return exactly that many, and
+`?limit=999999` is still capped at 1000 rather than erroring or falling
+back to unbounded.
 
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.

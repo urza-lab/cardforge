@@ -343,6 +343,8 @@
     "maxCardCount": "Max. Karten",
     "cardCountAny": "Alle",
     "minCardCountHint": "Standardmässig werden Cubes unter 40 Karten ausgeblendet — ein echter Teil des Caches sind kaputte/Platzhalter-Einträge mit nur 1-2 Karten. Feld leeren, um alles zu sehen.",
+    "limit": "Anzeigen",
+    "limitHint": "Der Cache kann hunderttausende Cubes enthalten — dies begrenzt, wie viele der aktuellen Sortierung/Filter gleichzeitig angezeigt werden, nicht wie viele gespeichert sind.",
     "featuredFilter": "Nur Featured",
     "featuredBadge": "Featured",
     "empty": "Noch keine populären Cubes zwischengespeichert — klicke oben auf \"Jetzt synchronisieren\".",
@@ -353,8 +355,8 @@
     "retryingAll": "Versuche erneut {{done}} / {{total}}… {{eta}}",
     "etaSeconds": "(noch ~{{seconds}}s)",
     "fullScrape": {
-      "title": "Vollständiger Cube-Import",
-      "description": "Der normale Sync oben erreicht nur Cubes nahe der Spitze von CubeCobras eigener Popularitätsrangliste (egal wie viele Seiten tief) — ein obskurer, ungelikter Cube wird so nie erreicht, egal wie tief. Dies durchläuft stattdessen CubeCobras echten Katalog bis zum wirklichen Ende und holt alles, was möglich ist. Es gibt keine verlässliche Möglichkeit, die echte Gesamtzahl im Voraus zu kennen, daher keine ETA — nur was bisher gefunden wurde und wie schnell es geht.",
+      "title": "Vollständiger Katalog-Scan",
+      "description": "Der normale Sync oben erreicht nur Cubes nahe der Spitze von CubeCobras eigener Popularitätsrangliste (egal wie viele Seiten tief) — ein obskurer, ungelikter Cube wird so nie erreicht, egal wie tief. Dies durchläuft stattdessen CubeCobras echten Katalog bis zum wirklichen Ende und cacht alles, was gefunden wird, damit es unten durchsuch- und filterbar ist. Es wird dabei nichts in deine Decks & Cubes importiert — das passiert erst, wenn du bei einem konkreten Cube auf Import klickst. Es gibt keine verlässliche Möglichkeit, die echte Gesamtzahl im Voraus zu kennen, daher keine ETA — nur was bisher gefunden wurde und wie schnell es geht.",
       "start": "Vollständigen Scrape starten",
       "status": {
         "INACTIVE": "Noch nicht ausgeführt",
