@@ -188,6 +188,18 @@ def attribution(cube_url: str) -> str:
     return f"Imported from CubeCobra: {cube_url}"
 
 
+# CubeCobra's own default placeholder text for a cube whose owner never
+# wrote a real description - found live via the full-catalog backfill scan:
+# of 206,753 real cubes, 111,192 (~54%) have exactly this string, not a
+# real description. Treating it as "has a description" (the original,
+# naive `c.get("description") or None` did) defeated the whole point of
+# using description as a "the owner put in real effort" quality signal -
+# see CLAUDE.md. Filtered out here at the source so every consumer
+# (list_popular_cubes's browse filter, the full-import candidate query)
+# gets the correct signal for free, rather than each needing its own fix.
+_CUBECOBRA_PLACEHOLDER_DESCRIPTION = "This is a brand new cube!"
+
+
 def _map_cube_entry(c: dict[str, Any]) -> PopularCubeEntry | None:
     cube_id = c.get("id")
     if not cube_id:
@@ -195,6 +207,9 @@ def _map_cube_entry(c: dict[str, Any]) -> PopularCubeEntry | None:
     short_id = c.get("shortId") or cube_id
     date_last_updated_ms = c.get("dateLastUpdated")
     owner = c.get("owner") or {}
+    description = c.get("description") or None
+    if description == _CUBECOBRA_PLACEHOLDER_DESCRIPTION:
+        description = None
     return PopularCubeEntry(
         external_id=str(cube_id),
         short_id=str(short_id),
@@ -208,7 +223,7 @@ def _map_cube_entry(c: dict[str, Any]) -> PopularCubeEntry | None:
         date_last_updated=(
             datetime.fromtimestamp(date_last_updated_ms / 1000, tz=UTC) if date_last_updated_ms else None
         ),
-        description=c.get("description") or None,
+        description=description,
         featured=bool(c.get("featured", False)),
         keywords=c.get("keywords") or None,
         version=c.get("version"),

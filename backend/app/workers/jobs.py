@@ -75,6 +75,15 @@ def run_full_cubecobra_scrape() -> None:
         db.close()
 
 
+def run_full_cube_import_job() -> None:
+    session_local = get_sessionmaker()
+    db = session_local()
+    try:
+        cube_discover_service.run_full_cube_import(db)
+    finally:
+        db.close()
+
+
 def sync_precon_decks() -> None:
     session_local = get_sessionmaker()
     db = session_local()

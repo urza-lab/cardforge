@@ -4,7 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.schemas.cubecobra import CubeDiscoverySyncStatusRead, CubeFullScrapeStatusRead, PopularCubeRead
+from app.schemas.cubecobra import (
+    CubeDiscoverySyncStatusRead,
+    CubeFullImportStatusRead,
+    CubeFullScrapeStatusRead,
+    PopularCubeRead,
+)
 from app.services import cube_discover_service
 
 router = APIRouter(prefix="/api/cube-discover", tags=["cube-discover"])
@@ -66,6 +71,26 @@ def trigger_full_scrape(db: Session = Depends(get_db)) -> CubeFullScrapeStatusRe
     except cube_discover_service.SyncAlreadyInProgressError as exc:
         raise HTTPException(status_code=409, detail="a full cube scrape is already in progress") from exc
     return CubeFullScrapeStatusRead.model_validate(state)
+
+
+@router.get("/cubes/full-import/status", response_model=CubeFullImportStatusRead)
+def get_full_import_status(db: Session = Depends(get_db)) -> CubeFullImportStatusRead:
+    return CubeFullImportStatusRead.model_validate(cube_discover_service.get_full_import_state(db))
+
+
+@router.post("/cubes/full-import", response_model=CubeFullImportStatusRead, status_code=202)
+def trigger_full_import(db: Session = Depends(get_db)) -> CubeFullImportStatusRead:
+    """User-requested: a real, resumable bulk *import* (download + create a
+    CardList) over a filtered subset of the cached cube pool - see
+    cube_discover_service.run_full_cube_import for the candidate rule and
+    why this is safe to call again after an interruption (resumes from
+    `last_cube_id` instead of restarting or re-downloading).
+    """
+    try:
+        state = cube_discover_service.trigger_full_import(db)
+    except cube_discover_service.SyncAlreadyInProgressError as exc:
+        raise HTTPException(status_code=409, detail="a full cube import is already in progress") from exc
+    return CubeFullImportStatusRead.model_validate(state)
 
 
 @router.post("/cubes/{cube_id}/import", response_model=PopularCubeRead)

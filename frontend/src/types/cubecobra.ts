@@ -20,6 +20,20 @@ export interface CubeFullScrapeStatusRead {
   error_message: string | null;
 }
 
+export type CubeFullImportStatus = "INACTIVE" | "RUNNING" | "COMPLETED" | "FAILED";
+
+export interface CubeFullImportStatusRead {
+  status: CubeFullImportStatus;
+  started_at: string | null;
+  finished_at: string | null;
+  last_progress_at: string | null;
+  total_candidates: number;
+  imported_count: number;
+  failed_count: number;
+  skipped_count: number;
+  error_message: string | null;
+}
+
 export interface PopularCube {
   id: number;
   name: string;

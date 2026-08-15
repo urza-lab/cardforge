@@ -4,6 +4,7 @@ import pytest
 from app.core.database import get_sessionmaker
 from app.models.cubecobra import CUBE_DISCOVERY_SYNC_STATE_ID, CubeDiscoverySyncState, PopularCube
 from app.models.lists import CardList
+from app.models.user import DEFAULT_USER_ID
 from app.parsers.common import ParsedRow, ParseResult
 from app.services import cube_discover_service, list_service
 from app.source_adapters import cubecobra
@@ -478,5 +479,187 @@ def test_import_popular_cube_does_not_cross_link_ambiguous_names(monkeypatch: py
         list_b = db.get(CardList, result_b.imported_list_id)
         assert list_a is not None and list_b is not None
         assert list_a.name != list_b.name
+    finally:
+        db.close()
+
+
+def _seed_full_import_cube(db, **overrides: object) -> PopularCube:
+    external_id = str(overrides.get("external_id", "fi-a"))
+    defaults: dict[str, object] = {
+        "external_id": external_id,
+        "short_id": external_id,
+        "name": "Full Import Cube",
+        "owner_username": "Alice",
+        "source_url": f"https://cubecobra.com/cube/list/{external_id}",
+        "card_count": 360,
+        "like_count": 0,
+        "num_decks": 0,
+        "owner_follower_count": None,
+        "description": None,
+        "tags": None,
+    }
+    defaults.update(overrides)
+    cube = PopularCube(**defaults)
+    db.add(cube)
+    db.commit()
+    db.refresh(cube)
+    return cube
+
+
+def test_full_import_candidates_excludes_small_cubes():
+    db = get_sessionmaker()()
+    try:
+        _seed_full_import_cube(db, external_id="small", card_count=39, like_count=99999)
+        big = _seed_full_import_cube(db, external_id="big", card_count=40, like_count=99999)
+
+        ids = list(db.scalars(cube_discover_service._full_import_candidates_select()))
+        assert ids == [big.id]
+    finally:
+        db.close()
+
+
+def test_full_import_candidates_includes_top_ranked_without_description():
+    """top_n=1 keeps this test meaningful with only 2 seeded rows - at the
+    real top_n=10,000 default, any 2-row test DB would trivially rank both
+    rows inside the top 10,000, masking the real "outside top-N" exclusion
+    this test exists to verify.
+    """
+    db = get_sessionmaker()()
+    try:
+        # Distinct, clearly-ordered values on all 3 ranked dimensions so a
+        # tie (e.g. both defaulting to num_decks=0) can't accidentally give
+        # "unpopular" a rank-1 tie on some other axis and mask the real
+        # top_n exclusion this test checks.
+        popular = _seed_full_import_cube(db, external_id="popular", like_count=5000, num_decks=500, owner_follower_count=50)
+        _seed_full_import_cube(db, external_id="unpopular", like_count=0, num_decks=0, owner_follower_count=0)
+
+        ids = list(db.scalars(cube_discover_service._full_import_candidates_select(top_n=1)))
+        assert ids == [popular.id]  # only the top-ranked one qualifies, no description on either
+    finally:
+        db.close()
+
+
+def test_full_import_candidates_includes_cubes_with_description_regardless_of_rank():
+    db = get_sessionmaker()()
+    try:
+        described = _seed_full_import_cube(
+            db, external_id="described", like_count=0, num_decks=0, description="A real cube."
+        )
+        ids = list(db.scalars(cube_discover_service._full_import_candidates_select()))
+        assert ids == [described.id]
+    finally:
+        db.close()
+
+
+def test_full_import_candidates_includes_cubes_with_enough_followers_without_description():
+    db = get_sessionmaker()()
+    try:
+        followed = _seed_full_import_cube(
+            db, external_id="followed", like_count=0, num_decks=0, owner_follower_count=5
+        )
+        _seed_full_import_cube(db, external_id="unfollowed", like_count=0, num_decks=0, owner_follower_count=4)
+
+        ids = list(db.scalars(cube_discover_service._full_import_candidates_select(top_n=0)))
+        assert ids == [followed.id]  # 5 is the real, user-chosen floor - 4 doesn't qualify
+    finally:
+        db.close()
+
+
+def test_trigger_full_import_computes_total_and_rejects_concurrent():
+    db = get_sessionmaker()()
+    try:
+        _seed_full_import_cube(db, external_id="a", description="real")
+        _seed_full_import_cube(db, external_id="b", card_count=1)  # too small, excluded
+
+        state = cube_discover_service.trigger_full_import(db)
+        assert state.status == "RUNNING"
+        assert state.total_candidates == 1
+
+        with pytest.raises(cube_discover_service.SyncAlreadyInProgressError):
+            cube_discover_service.trigger_full_import(db)
+    finally:
+        db.close()
+
+
+def test_run_full_cube_import_success_tracks_progress(monkeypatch: pytest.MonkeyPatch):
+    db = get_sessionmaker()()
+    try:
+        _seed_full_import_cube(db, external_id="a", name="Cube A", description="real")
+        _seed_full_import_cube(db, external_id="b", name="Cube B", description="real")
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result([("Sol Ring", 1)]))
+
+        state = cube_discover_service.run_full_cube_import(db)
+
+        assert state.status == "COMPLETED"
+        assert state.imported_count == 2
+        assert state.failed_count == 0
+        assert state.skipped_count == 0
+        assert db.query(CardList).count() == 2
+    finally:
+        db.close()
+
+
+def test_run_full_cube_import_records_failures_and_continues(monkeypatch: pytest.MonkeyPatch):
+    cube_a = None
+
+    def _fetch(url: str, user_agent: str):
+        if "/a" in url:
+            raise SourceFetchError("boom")
+        return _fetch_result([("Sol Ring", 1)])
+
+    db = get_sessionmaker()()
+    try:
+        cube_a = _seed_full_import_cube(db, external_id="a", name="Cube A", description="real")
+        _seed_full_import_cube(db, external_id="b", name="Cube B", description="real")
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", _fetch)
+
+        state = cube_discover_service.run_full_cube_import(db)
+
+        assert state.status == "COMPLETED"
+        assert state.imported_count == 1
+        assert state.failed_count == 1
+        db.refresh(cube_a)
+        assert cube_a.import_error is not None
+    finally:
+        db.close()
+
+
+def test_run_full_cube_import_skips_already_imported(monkeypatch: pytest.MonkeyPatch):
+    db = get_sessionmaker()()
+    try:
+        already = _seed_full_import_cube(db, external_id="a", name="Cube A", description="real")
+        real_list = list_service.create_list(db, name="Cube A", list_type="cube", user_id=DEFAULT_USER_ID)
+        already.imported_list_id = real_list.id
+        db.commit()
+        _seed_full_import_cube(db, external_id="b", name="Cube B", description="real")
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result([("Sol Ring", 1)]))
+
+        state = cube_discover_service.run_full_cube_import(db)
+
+        assert state.imported_count == 1  # only "b" was a genuinely new import
+        assert state.skipped_count == 1  # "a" was already imported, not re-downloaded
+    finally:
+        db.close()
+
+
+def test_run_full_cube_import_resumes_from_last_cube_id(monkeypatch: pytest.MonkeyPatch):
+    db = get_sessionmaker()()
+    try:
+        cube_a = _seed_full_import_cube(db, external_id="a", name="Cube A", description="real")
+        _seed_full_import_cube(db, external_id="b", name="Cube B", description="real")
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result([("Sol Ring", 1)]))
+
+        state = cube_discover_service.get_full_import_state(db)
+        state.last_cube_id = cube_a.id  # pretend "a" was already processed in a prior, interrupted run
+        state.imported_count = 1
+        db.commit()
+
+        state = cube_discover_service.run_full_cube_import(db)
+
+        assert state.status == "COMPLETED"
+        assert state.imported_count == 2  # 1 carried over + 1 newly processed ("b" only, "a" skipped by cursor)
+        cube_a_after = db.get(PopularCube, cube_a.id)
+        assert cube_a_after is not None
+        assert cube_a_after.imported_list_id is None  # never actually (re-)downloaded - resumed past it
     finally:
         db.close()

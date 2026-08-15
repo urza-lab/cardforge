@@ -111,6 +111,13 @@ def _clean_db():
         )
         db.execute(
             text(
+                "UPDATE cube_full_import_state SET status = 'INACTIVE', started_at = NULL, "
+                "finished_at = NULL, last_progress_at = NULL, total_candidates = 0, imported_count = 0, "
+                "failed_count = 0, skipped_count = 0, last_cube_id = NULL, error_message = NULL WHERE id = 1"
+            )
+        )
+        db.execute(
+            text(
                 "UPDATE precon_sync_state SET status = 'NOT_STARTED', started_at = NULL, "
                 "finished_at = NULL, deck_count = 0, error_message = NULL WHERE id = 1"
             )

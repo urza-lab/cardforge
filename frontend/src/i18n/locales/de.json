@@ -370,6 +370,25 @@
       "elapsedLabel": "Verstrichen",
       "lastProgress": "Letzter Fortschritt: {{time}}",
       "alreadyRunning": "Ein vollständiger Scrape läuft bereits."
+    },
+    "fullImport": {
+      "title": "Vollständiger Cube-Import",
+      "description": "Lädt jeden qualifizierenden Cube aus dem Cache oben herunter und importiert ihn in deine echten Decks & Cubes — nicht nur Metadaten cachen. Ein Cube qualifiziert sich ab 40 Karten und wenn er entweder in den Top 10.000 nach Likes, gebauten Decks oder Owner-Followern liegt, der Owner ≥5 Follower hat, oder eine echte Description vorhanden ist. Resumierbar: eine Unterbrechung (Worker-Neustart, Redeploy) macht genau dort weiter, wo aufgehört wurde, statt neu zu starten oder bereits importierte Cubes erneut herunterzuladen. Die echte Gesamtzahl ist im Voraus bekannt, daher ist der Fortschritt ein echter Prozentwert.",
+      "start": "Vollständigen Import starten",
+      "resume": "Import fortsetzen",
+      "status": {
+        "INACTIVE": "Noch nicht ausgeführt",
+        "RUNNING": "Läuft…",
+        "COMPLETED": "Abgeschlossen",
+        "FAILED": "Fehlgeschlagen"
+      },
+      "totalCandidates": "Kandidaten",
+      "imported": "Importiert",
+      "failed": "Fehlgeschlagen",
+      "skipped": "Bereits importiert",
+      "etaLabel": "noch ~{{time}}",
+      "lastProgress": "Letzter Fortschritt: vor {{time}}",
+      "stuckWarning": "Seit {{time}} kein Fortschritt — könnte feststecken (Worker prüfen)."
     }
   },
   "pricesPage": {

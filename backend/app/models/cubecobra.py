@@ -149,3 +149,49 @@ class CubeFullScrapeState(Base):
     # getting it wrong the same way would silently break resume instead of
     # just one row's display data.
     last_key: Mapped[str | None] = mapped_column(Text)
+
+
+CUBE_FULL_IMPORT_STATE_ID = 1
+
+
+class CubeFullImportStatus(str, enum.Enum):
+    inactive = "INACTIVE"
+    running = "RUNNING"
+    completed = "COMPLETED"
+    failed = "FAILED"
+
+
+class CubeFullImportState(Base):
+    """User-requested: a real, resumable bulk *import* (download each cube's
+    real card list and create a CardList row) over a filtered subset of the
+    already-cached `PopularCube` pool - distinct from CubeFullScrapeState
+    above, which only crawls/caches CubeCobra's search metadata and never
+    downloads a single card list. See app.services.cube_discover_service
+    `run_full_cube_import` for the real candidate-selection query.
+
+    Unlike the scrape, the candidate set here is a deterministic query over
+    data CardForge already has locally - so `total_candidates` (unlike the
+    scrape's cubes_found/pages_fetched-only design) can be a real, honest
+    upfront count, making a genuine percentage-based progress bar possible.
+    `last_cube_id` is the resume cursor (candidates are walked in a stable
+    `ORDER BY id ASC`) - same "persist progress every unit of work, resume
+    from exactly there instead of restarting" reasoning as the scrape's own
+    `last_key`, since this job is expected to run for many hours across
+    tens of thousands of real per-cube network fetches and must survive a
+    worker restart/redeploy without losing already-imported cubes or
+    re-downloading them.
+    """
+
+    __tablename__ = "cube_full_import_state"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    status: Mapped[str] = mapped_column(String(32), default=CubeFullImportStatus.inactive.value)
+    started_at: Mapped[datetime | None] = mapped_column()
+    finished_at: Mapped[datetime | None] = mapped_column()
+    last_progress_at: Mapped[datetime | None] = mapped_column()
+    total_candidates: Mapped[int] = mapped_column(default=0)
+    imported_count: Mapped[int] = mapped_column(default=0)
+    failed_count: Mapped[int] = mapped_column(default=0)
+    skipped_count: Mapped[int] = mapped_column(default=0)  # already imported before this job reached them
+    last_cube_id: Mapped[int | None] = mapped_column()
+    error_message: Mapped[str | None] = mapped_column(String(1024))

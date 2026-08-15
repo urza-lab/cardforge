@@ -1041,6 +1041,32 @@ payload), `?limit=500`/`?limit=1000` return exactly that many, and
 `?limit=999999` is still capped at 1000 rather than erroring or falling
 back to unbounded.
 
+**Gotcha #43 - a Grafana table panel's `fieldConfig.defaults.unit` applies
+to every column, including hidden ones used only for link templating, and
+Grafana's data-link URL substitution uses the formatted display value, not
+the raw one.** User-reported live, clicking a real "Open in CardForge"
+link from the "Decks & cubes by buildability coverage" panel: the browser
+landed on `/lists/1876%25` (`%25` = URL-encoded `%`) and the app correctly
+rejected it with HTTP 400, since `1876%` isn't a valid list id. Root cause:
+that panel's `fieldConfig.defaults` set `unit: "percent"` globally (meant
+for the visible "Coverage %" column only), and the hidden `list_id` column
+(used purely for `${__data.fields.list_id}` in the link URL, `custom.
+hidden: true`) inherited it with no override resetting it - Grafana
+formatted the raw integer `1876` as `1876%` for display, and that
+formatted string, not the raw value, is what gets substituted into the
+link template. Fixed by moving `unit`/`min`/`max` out of the panel's
+global `defaults` and into the "Coverage %" column's own override only -
+matching the pattern the dashboard's *other* table panel ("Cheapest cubes
+to complete") already used correctly, which is why only one of the two
+panels ever hit this. Verified live via Grafana's own API
+(`GET /api/dashboards/uid/cardforge-high-coverage`) after the bind-mounted
+dashboard JSON's 30s provisioning auto-reload: `list_id`'s field config no
+longer carries any inherited unit. General lesson: a table panel's
+`fieldConfig.defaults` reaches every field including ones only used for
+plumbing (hidden id columns, link templates) - format-sensitive properties
+belong on a specific column's `overrides` entry, not the shared `defaults`,
+even for a field nobody is meant to visually see.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key

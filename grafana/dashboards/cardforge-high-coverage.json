@@ -2,7 +2,7 @@
   "title": "CardForge — High-Coverage Decks",
   "uid": "cardforge-high-coverage",
   "schemaVersion": 39,
-  "version": 3,
+  "version": 4,
   "editable": true,
   "timezone": "browser",
   "refresh": "5m",
@@ -55,10 +55,7 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "custom": { "align": "auto", "cellOptions": { "type": "auto" } },
-          "unit": "percent",
-          "min": 0,
-          "max": 100
+          "custom": { "align": "auto", "cellOptions": { "type": "auto" } }
         },
         "overrides": [
           {
@@ -83,6 +80,9 @@
           {
             "matcher": { "id": "byName", "options": "Coverage %" },
             "properties": [
+              { "id": "unit", "value": "percent" },
+              { "id": "min", "value": 0 },
+              { "id": "max", "value": 100 },
               {
                 "id": "custom.cellOptions",
                 "value": {

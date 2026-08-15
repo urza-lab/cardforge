@@ -191,6 +191,28 @@ def test_list_cubes_defaults_to_a_bounded_limit():
     assert len(resp_over_max) == 5  # capped server-side, but never crashes/errors
 
 
+def test_full_import_status_starts_inactive():
+    resp = client.get("/api/cube-discover/cubes/full-import/status")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "INACTIVE"
+    assert body["total_candidates"] == 0
+    assert body["imported_count"] == 0
+
+
+def test_trigger_full_import_marks_running_and_rejects_concurrent():
+    _seed_cube(external_id="fi-a", name="FI Cube A", description="real")
+
+    resp = client.post("/api/cube-discover/cubes/full-import")
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "RUNNING"
+    assert body["total_candidates"] == 1
+
+    second = client.post("/api/cube-discover/cubes/full-import")
+    assert second.status_code == 409
+
+
 def test_import_cube_success(monkeypatch: pytest.MonkeyPatch):
     cube = _seed_cube(external_id="import-me", name="Import Me")
     monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result())

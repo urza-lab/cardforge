@@ -2,11 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { apiGet, apiPostJson, ApiError } from "../api/client";
-import type { CubeDiscoverySyncStatusRead, CubeFullScrapeStatusRead, PopularCube } from "../types/cubecobra";
+import type {
+  CubeDiscoverySyncStatusRead,
+  CubeFullImportStatusRead,
+  CubeFullScrapeStatusRead,
+  PopularCube,
+} from "../types/cubecobra";
 import { parseUtcTimestamp } from "../utils/time";
 
 const POLL_INTERVAL_MS = 3000;
 const FULL_SCRAPE_POLL_INTERVAL_MS = 5000;
+const FULL_IMPORT_POLL_INTERVAL_MS = 5000;
 
 function formatDuration(seconds: number): string {
   const totalSeconds = Math.max(0, Math.round(seconds));
@@ -128,6 +134,81 @@ export default function DiscoverCubes() {
     fullScrapeElapsedSeconds !== null && fullScrapeStatus && fullScrapeStatus.cubes_found > 0
       ? fullScrapeElapsedSeconds / fullScrapeStatus.cubes_found
       : null;
+
+  const [fullImportStatus, setFullImportStatus] = useState<CubeFullImportStatusRead | null>(null);
+  const [fullImportError, setFullImportError] = useState<string | null>(null);
+  const [fullImportStarting, setFullImportStarting] = useState(false);
+
+  const fetchFullImportStatus = () => {
+    apiGet<CubeFullImportStatusRead>("/cube-discover/cubes/full-import/status")
+      .then(setFullImportStatus)
+      .catch(() => {
+        // Non-fatal - this section just stays unavailable if it fails.
+      });
+  };
+
+  useEffect(fetchFullImportStatus, []);
+
+  useEffect(() => {
+    if (fullImportStatus?.status !== "RUNNING") return;
+    // Also refresh the cube table itself - user-requested real-time
+    // feedback, same reasoning as the full-scrape's own poll effect: newly
+    // imported cubes should show "View list" as soon as each one lands,
+    // not only once the whole (potentially many-hour) job finishes.
+    const pollId = setInterval(() => {
+      fetchFullImportStatus();
+      fetchCubes();
+    }, FULL_IMPORT_POLL_INTERVAL_MS);
+    const tickId = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => {
+      clearInterval(pollId);
+      clearInterval(tickId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fullImportStatus?.status]);
+
+  async function handleStartFullImport() {
+    setFullImportStarting(true);
+    setFullImportError(null);
+    try {
+      const resp = await apiPostJson<CubeFullImportStatusRead>("/cube-discover/cubes/full-import", {});
+      setFullImportStatus(resp);
+    } catch (err) {
+      setFullImportError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setFullImportStarting(false);
+    }
+  }
+
+  const fullImportProcessed = fullImportStatus
+    ? fullImportStatus.imported_count + fullImportStatus.failed_count + fullImportStatus.skipped_count
+    : 0;
+  // Unlike the full-scrape (CubeCobra exposes no count endpoint, so no real
+  // total is ever knowable), this job's candidate set is a deterministic
+  // query over data CardForge already has - total_candidates is a real,
+  // honest upfront count, so an actual percentage-based progress bar and
+  // ETA are possible here, unlike the scrape's "no ETA" design.
+  const fullImportPercent =
+    fullImportStatus && fullImportStatus.total_candidates > 0
+      ? Math.min(100, (fullImportProcessed / fullImportStatus.total_candidates) * 100)
+      : 0;
+  const fullImportElapsedSeconds =
+    fullImportStatus?.started_at && fullImportStatus.status === "RUNNING"
+      ? (nowTick - parseUtcTimestamp(fullImportStatus.started_at)) / 1000
+      : null;
+  const fullImportEtaSeconds =
+    fullImportElapsedSeconds !== null && fullImportProcessed > 0 && fullImportStatus
+      ? (fullImportElapsedSeconds / fullImportProcessed) * (fullImportStatus.total_candidates - fullImportProcessed)
+      : null;
+  // User-requested "healthcheck": each real per-cube fetch is ~2.2-2.6s
+  // (measured live), so no progress for several minutes while RUNNING is a
+  // real signal something's stuck (a hung worker process - see gotcha
+  // #38 - or a worker restart mid-job), not just normal pacing.
+  const fullImportSecondsSinceProgress =
+    fullImportStatus?.last_progress_at && fullImportStatus.status === "RUNNING"
+      ? (nowTick - parseUtcTimestamp(fullImportStatus.last_progress_at)) / 1000
+      : null;
+  const fullImportLooksStuck = fullImportSecondsSinceProgress !== null && fullImportSecondsSinceProgress > 300;
 
   const fetchStatus = () => {
     apiGet<CubeDiscoverySyncStatusRead>("/cube-discover/cubes/status")
@@ -382,6 +463,106 @@ export default function DiscoverCubes() {
             {fullScrapeStatus?.status === "RUNNING"
               ? t("discoverCubesPage.fullScrape.status.RUNNING")
               : t("discoverCubesPage.fullScrape.start")}
+          </button>
+        </div>
+      </div>
+
+      <div className="cf-card">
+        <h3 style={{ marginTop: 0 }}>{t("discoverCubesPage.fullImport.title")}</h3>
+        <p style={{ color: "var(--cf-muted)" }}>{t("discoverCubesPage.fullImport.description")}</p>
+        {fullImportError && <div className="cf-alert cf-alert-error">{fullImportError}</div>}
+        {fullImportStatus?.status === "FAILED" && fullImportStatus.error_message && (
+          <div className="cf-alert cf-alert-error">{fullImportStatus.error_message}</div>
+        )}
+        {fullImportStatus && (
+          <>
+            <div className="cf-stat-row">
+              <div className="cf-stat">
+                <span
+                  className={
+                    fullImportStatus.status === "COMPLETED"
+                      ? "cf-badge cf-badge-ok"
+                      : fullImportStatus.status === "FAILED"
+                        ? "cf-badge cf-badge-error"
+                        : fullImportStatus.status === "RUNNING"
+                          ? "cf-badge cf-badge-warn"
+                          : "cf-badge"
+                  }
+                >
+                  {t(`discoverCubesPage.fullImport.status.${fullImportStatus.status}`)}
+                </span>
+              </div>
+              <div className="cf-stat">
+                <div className="cf-stat-value">{fullImportStatus.total_candidates.toLocaleString()}</div>
+                <div className="cf-stat-label">{t("discoverCubesPage.fullImport.totalCandidates")}</div>
+              </div>
+              <div className="cf-stat">
+                <div className="cf-stat-value">{fullImportStatus.imported_count.toLocaleString()}</div>
+                <div className="cf-stat-label">{t("discoverCubesPage.fullImport.imported")}</div>
+              </div>
+              <div className="cf-stat">
+                <div className="cf-stat-value">{fullImportStatus.failed_count.toLocaleString()}</div>
+                <div className="cf-stat-label">{t("discoverCubesPage.fullImport.failed")}</div>
+              </div>
+              <div className="cf-stat">
+                <div className="cf-stat-value">{fullImportStatus.skipped_count.toLocaleString()}</div>
+                <div className="cf-stat-label">{t("discoverCubesPage.fullImport.skipped")}</div>
+              </div>
+              {fullImportStatus.status === "RUNNING" && fullImportElapsedSeconds !== null && (
+                <div className="cf-stat">
+                  <div className="cf-stat-value">{formatDuration(fullImportElapsedSeconds)}</div>
+                  <div className="cf-stat-label">
+                    {fullImportEtaSeconds !== null
+                      ? t("discoverCubesPage.fullImport.etaLabel", { time: formatDuration(fullImportEtaSeconds) })
+                      : t("discoverCubesPage.fullScrape.elapsedLabel")}
+                  </div>
+                </div>
+              )}
+            </div>
+            {fullImportStatus.total_candidates > 0 && (
+              <div
+                style={{
+                  height: 8,
+                  borderRadius: 4,
+                  background: "var(--cf-border, #333)",
+                  overflow: "hidden",
+                  margin: "8px 0",
+                }}
+              >
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${fullImportPercent}%`,
+                    background: fullImportStatus.status === "FAILED" ? "var(--cf-error, #c33)" : "var(--cf-accent, #7c5cff)",
+                    transition: "width 0.5s ease",
+                  }}
+                />
+              </div>
+            )}
+            {fullImportStatus.status === "RUNNING" && fullImportSecondsSinceProgress !== null && (
+              <p style={{ fontSize: 12, color: fullImportLooksStuck ? "var(--cf-error, #c33)" : "var(--cf-muted)" }}>
+                {fullImportLooksStuck
+                  ? t("discoverCubesPage.fullImport.stuckWarning", {
+                      time: formatDuration(fullImportSecondsSinceProgress),
+                    })
+                  : t("discoverCubesPage.fullImport.lastProgress", {
+                      time: formatDuration(fullImportSecondsSinceProgress),
+                    })}
+              </p>
+            )}
+          </>
+        )}
+        <div className="cf-btn-row">
+          <button
+            className="cf-btn cf-btn-primary"
+            disabled={fullImportStarting || fullImportStatus?.status === "RUNNING"}
+            onClick={handleStartFullImport}
+          >
+            {fullImportStatus?.status === "RUNNING"
+              ? t("discoverCubesPage.fullImport.status.RUNNING")
+              : fullImportStatus && fullImportStatus.last_progress_at
+                ? t("discoverCubesPage.fullImport.resume")
+                : t("discoverCubesPage.fullImport.start")}
           </button>
         </div>
       </div>

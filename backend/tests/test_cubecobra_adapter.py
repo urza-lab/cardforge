@@ -193,6 +193,27 @@ def test_fetch_popular_cubes_quality_signals_default_sensibly_when_absent(monkey
     assert entry.owner_follower_count is None
 
 
+def test_fetch_popular_cubes_treats_cubecobras_default_description_as_no_description(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Real bug found live via the full-catalog backfill scan: 111,192 of
+    206,753 real cubes (~54%) have exactly CubeCobra's own default
+    placeholder text, not a real description an owner wrote - treating it
+    as "has a description" defeated the whole point of using description
+    as a quality signal (see CLAUDE.md).
+    """
+    monkeypatch.setattr(cubecobra.time, "sleep", lambda *_: None)
+    cube = {
+        "id": "abc-1", "shortId": "topcube", "name": "New Cube", "owner": {"username": "Alice"},
+        "description": "This is a brand new cube!",
+    }
+    monkeypatch.setattr(cubecobra.httpx, "post", lambda *a, **k: _search_response([cube], last_key=None))
+
+    cubes = cubecobra.fetch_popular_cubes("test-agent", pages=5)
+
+    assert cubes[0].description is None
+
+
 def test_fetch_popular_cubes_raises_on_non_200(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(cubecobra.time, "sleep", lambda *_: None)
     monkeypatch.setattr(

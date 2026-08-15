@@ -27,6 +27,20 @@ class CubeFullScrapeStatusRead(BaseModel):
     error_message: str | None
 
 
+class CubeFullImportStatusRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    status: str
+    started_at: datetime | None
+    finished_at: datetime | None
+    last_progress_at: datetime | None
+    total_candidates: int
+    imported_count: int
+    failed_count: int
+    skipped_count: int
+    error_message: str | None
+
+
 class PopularCubeRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

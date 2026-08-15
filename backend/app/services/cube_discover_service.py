@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
@@ -17,9 +17,12 @@ from app.core.config import Settings, get_settings
 from app.core.queue import get_queue
 from app.models.cubecobra import (
     CUBE_DISCOVERY_SYNC_STATE_ID,
+    CUBE_FULL_IMPORT_STATE_ID,
     CUBE_FULL_SCRAPE_STATE_ID,
     CubeDiscoverySyncState,
     CubeDiscoverySyncStatus,
+    CubeFullImportState,
+    CubeFullImportStatus,
     CubeFullScrapeState,
     CubeFullScrapeStatus,
     PopularCube,
@@ -295,6 +298,170 @@ def run_full_cube_scrape(db: Session, settings: Settings | None = None) -> CubeF
         db.rollback()
         state = get_full_scrape_state(db)
         state.status = CubeFullScrapeStatus.failed.value
+        state.error_message = str(exc)[:1024]
+        state.finished_at = datetime.now(UTC)
+        db.commit()
+        raise
+
+    return state
+
+
+# Real, user-requested bulk-import candidate rule (see CLAUDE.md) - a cube
+# qualifies once it has real substance (>= 40 cards) AND is either popular
+# enough (top N by one of CubeCobra's 3 real popularity signals - there is
+# no real "views" field, confirmed live) or has other evidence of being a
+# real, cared-for cube (an owner with real followers, or a written
+# description) rather than one of the many auto-named, unmaintained cubes
+# the full catalog scrape also picked up.
+FULL_IMPORT_MIN_CARD_COUNT = 40
+FULL_IMPORT_TOP_N_PER_CATEGORY = 10_000
+FULL_IMPORT_MIN_FOLLOWERS = 5
+
+
+def _full_import_candidates_select(min_id: int | None = None, top_n: int = FULL_IMPORT_TOP_N_PER_CATEGORY):
+    """Ranks the whole `popular_cubes` table by each of the 3 real
+    popularity signals CubeCobra exposes (like_count/num_decks/
+    owner_follower_count - "most viewed" was requested but CubeCobra has no
+    real per-cube view counter, confirmed live by dumping a full raw cube
+    object: the only `views` key is a display-layout config, not a
+    counter) and selects ids that are either in the top
+    FULL_IMPORT_TOP_N_PER_CATEGORY of any of those 3, or have
+    >= FULL_IMPORT_MIN_FOLLOWERS followers, or have a real description -
+    always AND'd with the >= FULL_IMPORT_MIN_CARD_COUNT floor. Window
+    functions are recomputed on every call rather than cached - acceptable
+    since this only runs once per (re)trigger, not per candidate.
+    """
+    likes_rank = func.rank().over(order_by=PopularCube.like_count.desc().nulls_last())
+    decks_rank = func.rank().over(order_by=PopularCube.num_decks.desc().nulls_last())
+    followers_rank = func.rank().over(order_by=PopularCube.owner_follower_count.desc().nulls_last())
+    ranked = select(
+        PopularCube.id,
+        PopularCube.card_count,
+        PopularCube.description,
+        PopularCube.owner_follower_count,
+        likes_rank.label("likes_rank"),
+        decks_rank.label("decks_rank"),
+        followers_rank.label("followers_rank"),
+    ).subquery("ranked_cubes")
+
+    conditions = [
+        ranked.c.card_count >= FULL_IMPORT_MIN_CARD_COUNT,
+        or_(
+            ranked.c.likes_rank <= top_n,
+            ranked.c.decks_rank <= top_n,
+            ranked.c.followers_rank <= top_n,
+            ranked.c.owner_follower_count >= FULL_IMPORT_MIN_FOLLOWERS,
+            ranked.c.description.is_not(None),
+        ),
+    ]
+    if min_id is not None:
+        conditions.append(ranked.c.id > min_id)
+    return select(ranked.c.id).where(*conditions).order_by(ranked.c.id)
+
+
+def get_full_import_state(db: Session) -> CubeFullImportState:
+    state = db.get(CubeFullImportState, CUBE_FULL_IMPORT_STATE_ID)
+    if state is None:
+        raise RuntimeError("cube_full_import_state row is missing - has the migration been applied?")
+    return state
+
+
+def trigger_full_import(db: Session) -> CubeFullImportState:
+    """Starts (or resumes, if `state.last_cube_id` is already set from a
+    prior interrupted/failed run) the real bulk import. Unlike
+    trigger_full_scrape, the candidate set here is a deterministic query
+    over data already in the database, so a real, honest `total_candidates`
+    can be computed upfront - recomputed on every trigger (including a
+    resume) so it reflects the current cache, not a stale snapshot.
+    `imported_count`/`failed_count`/`skipped_count`/`last_cube_id` are
+    deliberately NOT reset here - they're cumulative across the whole
+    logical job (which may span several worker restarts/redeploys), not
+    per-trigger-call, so the progress bar never jumps backwards.
+    """
+    state = get_full_import_state(db)
+    if state.status == CubeFullImportStatus.running.value:
+        raise SyncAlreadyInProgressError
+
+    from app.workers.jobs import run_full_cube_import_job
+
+    total = db.scalar(select(func.count()).select_from(_full_import_candidates_select().subquery())) or 0
+
+    # Same "no principled way to size this" reasoning as trigger_full_scrape
+    # - a real per-cube fetch is ~2.2-2.6s (measured live), so tens of
+    # thousands of candidates is realistically a multi-day job; the timeout
+    # is a safety net against a truly stuck job, not an estimate.
+    get_queue("default").enqueue(run_full_cube_import_job, job_timeout=604800)
+    state.status = CubeFullImportStatus.running.value
+    if state.started_at is None:
+        state.started_at = datetime.now(UTC)
+    state.finished_at = None
+    state.total_candidates = total
+    state.error_message = None
+    db.commit()
+    db.refresh(state)
+    return state
+
+
+def run_full_cube_import(db: Session, *, user_id: int = DEFAULT_USER_ID) -> CubeFullImportState:
+    """Real, resumable bulk import (user-requested) over the candidate set
+    `_full_import_candidates_select` defines - downloads each candidate's
+    real card list via the existing single-cube `import_popular_cube` (same
+    fetch-and-parse path, same per-cube failure handling: a failed cube is
+    recorded as `import_error` on its own row and the walk continues, never
+    aborting the whole job over one bad cube). Walks candidates in a stable
+    `ORDER BY id ASC` and persists `last_cube_id` after every cube - a
+    worker restart/redeploy (a real, routine occurrence during this
+    project's dev sessions - see gotchas #16/#18/#29/#38) resumes exactly
+    where it left off instead of restarting from the first candidate or
+    re-downloading cubes already imported.
+
+    No extra pacing/delay is added between cubes beyond each fetch's own
+    real network+parse latency (~2.2-2.6s, measured live) - a real 808-cube
+    sequential bulk import earlier in this project hit zero CubeCobra rate
+    limiting at that same natural, unthrottled pace (see CLAUDE.md); this
+    job can run far longer in wall-clock time but at the same real
+    per-request rate, not a faster one.
+    """
+    state = get_full_import_state(db)
+    resume_from = state.last_cube_id
+    candidate_ids = list(db.scalars(_full_import_candidates_select(min_id=resume_from)))
+
+    state.status = CubeFullImportStatus.running.value
+    if state.started_at is None:
+        state.started_at = datetime.now(UTC)
+    state.finished_at = None
+    state.error_message = None
+    db.commit()
+
+    try:
+        for cube_id in candidate_ids:
+            cube = db.get(PopularCube, cube_id)
+            if cube is None:
+                continue
+            was_already_imported = cube.imported_list_id is not None
+
+            result_cube = import_popular_cube(db, cube_id, user_id=user_id)
+
+            state = get_full_import_state(db)
+            if result_cube.imported_list_id is not None:
+                if was_already_imported:
+                    state.skipped_count += 1
+                else:
+                    state.imported_count += 1
+            else:
+                state.failed_count += 1
+            state.last_cube_id = cube_id
+            state.last_progress_at = datetime.now(UTC)
+            db.commit()
+
+        state = get_full_import_state(db)
+        state.status = CubeFullImportStatus.completed.value
+        state.finished_at = datetime.now(UTC)
+        db.commit()
+    except Exception as exc:  # noqa: BLE001 - any failure must be recorded, not silently swallowed
+        db.rollback()
+        state = get_full_import_state(db)
+        state.status = CubeFullImportStatus.failed.value
         state.error_message = str(exc)[:1024]
         state.finished_at = datetime.now(UTC)
         db.commit()
