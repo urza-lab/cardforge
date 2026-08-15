@@ -583,9 +583,18 @@ def import_popular_cube(db: Session, cube_id: int, *, user_id: int = DEFAULT_USE
         or 0
     ) > 1
 
-    target_name = cube.name
+    # `card_lists.name` is String(128) - a real cube name (or the
+    # disambiguated "name (short_id)" form) can exceed that, confirmed live
+    # by the full-import job crashing outright on a real ~150-char cube name
+    # with an uncaught StringDataRightTruncation, taking down the whole job
+    # instead of just that one cube (see CLAUDE.md). Truncated the same way
+    # gotcha #34/#40's `_truncate` already handles this class of bug
+    # elsewhere in this project.
+    target_name = _truncate(cube.name, 128)
+    assert target_name is not None  # cube.name is a non-nullable str column
     if name_is_ambiguous:
-        target_name = f"{cube.name} ({cube.short_id})"
+        target_name = _truncate(f"{cube.name} ({cube.short_id})", 128)
+        assert target_name is not None
     else:
         existing = db.scalars(
             select(CardList).where(
@@ -606,14 +615,20 @@ def import_popular_cube(db: Session, cube_id: int, *, user_id: int = DEFAULT_USE
             list_service.delete_list(db, existing)
 
     settings = get_settings()
-    card_list = list_service.create_list(db, name=target_name, list_type="cube", user_id=user_id)
     try:
+        card_list = list_service.create_list(db, name=target_name, list_type="cube", user_id=user_id)
         import_record, _deck_name = list_import_service.create_preview_from_url(
             db, card_list=card_list, url=cube.source_url, user_agent=settings.scryfall_user_agent, user_id=user_id
         )
         list_import_service.confirm_import(db, import_record, skip_bad_rows=True)
     except Exception as exc:  # noqa: BLE001 - any failure here must be recorded, not silently swallowed
-        list_service.delete_list(db, card_list)
+        # A failure inside create_list itself (e.g. the truncation bug this
+        # whole try/except was widened to cover) leaves the session's
+        # transaction aborted - roll back before any further query, and
+        # `card_list` was never successfully assigned in that specific case.
+        db.rollback()
+        if "card_list" in locals():
+            list_service.delete_list(db, card_list)
         cube = db.get(PopularCube, cube_id)
         assert cube is not None  # just loaded above; nothing else can delete a PopularCube mid-request
         cube.import_error = str(exc)[:1024]

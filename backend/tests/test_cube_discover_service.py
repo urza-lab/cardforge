@@ -447,6 +447,36 @@ def test_import_popular_cube_replaces_existing_empty_same_name_list(monkeypatch:
         db.close()
 
 
+def test_import_popular_cube_truncates_overlong_name_instead_of_crashing(monkeypatch: pytest.MonkeyPatch):
+    """Real bug found live: a full-import run crashed the entire job (not
+    just one cube) on a real ~150-char cube name - `card_lists.name` is
+    String(128), and the pre-existing insert wasn't wrapped in the same
+    try/except that already recorded other per-cube failures, so a real
+    StringDataRightTruncation propagated all the way up and set the whole
+    job's status to FAILED after only ~100 real imports. See CLAUDE.md.
+    """
+    long_name = "A Cube Name So Long It Blows Right Past The Real 128-Character Column Limit " + ("X" * 60)
+    assert len(long_name) > 128
+    monkeypatch.setattr(
+        cube_discover_service.cubecobra, "fetch_popular_cubes", lambda user_agent, **kw: [_entry("a", name=long_name)]
+    )
+    db = get_sessionmaker()()
+    try:
+        cube_discover_service.run_cube_discovery_sync(db)
+        cube = db.query(PopularCube).filter_by(external_id="a").one()
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result([("Sol Ring", 1)]))
+
+        result = cube_discover_service.import_popular_cube(db, cube.id)
+
+        assert result.import_error is None
+        assert result.imported_list_id is not None
+        imported_list = db.get(CardList, result.imported_list_id)
+        assert imported_list is not None
+        assert len(imported_list.name) <= 128
+    finally:
+        db.close()
+
+
 def test_import_popular_cube_does_not_cross_link_ambiguous_names(monkeypatch: pytest.MonkeyPatch):
     """Real bug found live: two distinct real cubes can share an identical
     display name (e.g. "Commander Cube" by 5 different owners). Importing

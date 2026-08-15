@@ -1098,6 +1098,32 @@ drift: a third-party API's field shape isn't a fixed contract - a change
 verified) can surface anywhere in a large, varied real dataset before it
 ever shows up in a small hand-written test fixture.
 
+**Gotcha #45 - the real full cube import crashed the entire 90,733-candidate
+job after only ~100 real imports, on an uncaught `StringDataRightTruncation`
+from a real ~150-character cube name.** `card_lists.name` is `String(128)`;
+`import_popular_cube`'s `list_service.create_list(...)` call sat *outside*
+the function's own try/except (the block only wrapped the fetch/confirm
+steps, added for a different failure mode originally), so a real cube name
+this long - "Not a Peasant Cube any more because the same three peasant
+cubes get voted into Cube Con every year and I'm tired of competing against
+them" - propagated all the way up through `run_full_cube_import` and set
+the whole job's status to `FAILED`, even though the resume-cursor design
+(see the full-import feature entry above) meant no already-imported cube
+was lost. Fixed by (1) truncating the target list name to 128 chars with
+the same `_truncate` helper gotchas #34/#40 already established for this
+exact class of bug, and (2) moving `create_list` inside the try/except so
+*any* future failure there - not just this specific truncation case - is
+recorded as `cube.import_error` and the job moves on to the next candidate,
+instead of ever crashing the whole run again. Verified live: after
+redeploying (backend+worker together, safe now since the job was already
+`FAILED`, not actively `RUNNING`), retriggering resumed from the persisted
+cursor (jumped straight to id-ordered position past `imported_count: 103`,
+not a restart) and continued past 1,700+ more real imports with only 3 real,
+correctly-recorded-not-crashing per-cube failures (two genuinely huge
+cubes CubeCobra's own CSV export rejected with HTTP 413, one private/
+removed cube) - exactly the resilience this fix was for. 427 backend tests
+pass; `ruff`/`mypy` clean.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key
