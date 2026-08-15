@@ -146,6 +146,27 @@ def attribution(deck_url: str) -> str:
     return f"Imported from Archidekt: {deck_url}"
 
 
+def _extract_tag_names(raw_tags: Any) -> list[str] | None:
+    """Real bug found live: Archidekt's search response `tags` field is a
+    list of tag-assignment objects (`{"id": ..., "tag": <numeric id>,
+    "name": "Sacrifice", "position": ...}`), not plain strings - storing
+    these dicts directly crashed `GET /api/discover/decks` (see
+    app/schemas/discover.py's PopularDeckRead validator, which normalizes
+    already-stored rows the same way). The real tag name lives under
+    `name`. Both shapes are handled defensively rather than assuming this
+    is the only one Archidekt will ever return.
+    """
+    if not isinstance(raw_tags, list):
+        return None
+    names: list[str] = []
+    for t in raw_tags:
+        if isinstance(t, str):
+            names.append(t)
+        elif isinstance(t, dict) and isinstance(t.get("name"), str):
+            names.append(t["name"])
+    return names or None
+
+
 def fetch_popular_decks(user_agent: str, *, fmt: int = COMMANDER_FORMAT_ID) -> list[PopularDeckEntry]:
     """Real public data from Archidekt's own search - see SEARCH_API above
     for what's actually confirmed to work. Unlike Moxfield, only one sort
@@ -200,7 +221,7 @@ def fetch_popular_decks(user_agent: str, *, fmt: int = COMMANDER_FORMAT_ID) -> l
                 theorycrafted=entry.get("theorycrafted"),
                 comment_count=entry.get("comments") or 0,
                 deck_updated_at=_parse_archidekt_timestamp(entry.get("updatedAt")),
-                tags=entry.get("tags") or None,
+                tags=_extract_tag_names(entry.get("tags")),
             )
 
     return list(by_id.values())

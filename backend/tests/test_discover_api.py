@@ -170,6 +170,26 @@ def test_list_decks_tag_filter():
     assert [d["name"] for d in resp] == ["Competitive Deck"]
 
 
+def test_list_decks_normalizes_malformed_tag_assignment_objects():
+    """Real bug found live: some already-stored PopularDeck rows have
+    `tags` as a list of Archidekt tag-assignment objects (dicts with an
+    "id"/"tag"/"name"/"position" shape), not plain strings - this crashed
+    the whole endpoint with a 500 (Pydantic validation error) regardless of
+    which row in the result set had it. See app/schemas/discover.py's
+    PopularDeckRead validator and CLAUDE.md.
+    """
+    _seed_deck(
+        external_id="malformed-tags",
+        name="Malformed Tags Deck",
+        tags=[{"id": 1, "tag": 33, "deck": 111, "name": "Sacrifice", "position": "M-500000"}, "PlainStringTag"],
+    )
+
+    resp = client.get("/api/discover/decks")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body[0]["tags"] == ["Sacrifice", "PlainStringTag"]
+
+
 def test_list_decks_sort_by_comments_and_bookmarks():
     _seed_deck(external_id="a", name="A", comment_count=5, bookmark_count=50)
     _seed_deck(external_id="b", name="B", comment_count=50, bookmark_count=5)

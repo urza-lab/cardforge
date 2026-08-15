@@ -195,6 +195,37 @@ def test_fetch_popular_decks_extracts_new_real_fields(monkeypatch: pytest.Monkey
     assert d.tags == ["Competitive"]
 
 
+def test_fetch_popular_decks_extracts_tag_names_from_tag_assignment_objects(monkeypatch: pytest.MonkeyPatch):
+    """Real bug found live: Archidekt's real search response `tags` field is
+    actually a list of tag-assignment objects (id/tag/deck/name/position),
+    not plain strings the way the original code assumed - storing the raw
+    dicts crashed GET /api/discover/decks with a 500 on every request (see
+    CLAUDE.md). The real tag name lives under "name".
+    """
+    monkeypatch.setattr(archidekt.time, "sleep", lambda *_: None)
+    real_deck = {
+        "id": 111, "name": "Real Deck", "owner": {"username": "Alice"},
+        "viewCount": 5000, "colors": {"W": 10, "U": 20, "B": 0, "R": 0, "G": 0},
+        "tags": [
+            {"id": 1063362, "tag": 33, "deck": 111, "name": "Sacrifice", "position": "M-500000"},
+            {"id": 1063363, "tag": 29, "deck": 111, "name": "Aristocrats", "position": "M-500000"},
+        ],
+    }
+    calls = {"n": 0}
+
+    def fake_get(url: str, params: dict[str, object], headers: dict[str, str], timeout: float) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _search_response([real_deck])
+        return _search_response([])
+
+    monkeypatch.setattr(archidekt.httpx, "get", fake_get)
+
+    decks = archidekt.fetch_popular_decks("test-agent")
+
+    assert decks[0].tags == ["Sacrifice", "Aristocrats"]
+
+
 def test_search_by_commander_returns_matching_external_ids(monkeypatch: pytest.MonkeyPatch):
     captured = {}
 

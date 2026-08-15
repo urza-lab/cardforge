@@ -1067,6 +1067,37 @@ plumbing (hidden id columns, link templates) - format-sensitive properties
 belong on a specific column's `overrides` entry, not the shared `defaults`,
 even for a field nobody is meant to visually see.
 
+**Gotcha #44 - Archidekt's real search response `tags` field is a list of
+tag-assignment objects, not plain strings, and one such row anywhere in
+the result set crashed the entire Discover Decks list with a 500.**
+User-reported live via a screenshot: `GET /api/discover/decks?sort=views`
+failed outright. `PopularDeckRead.tags` was typed `list[str] | None` and
+`app.source_adapters.archidekt.fetch_popular_decks` stored `entry.get
+("tags")` directly, both assuming Archidekt always returns plain tag
+strings - a live raw API check found the real shape is
+`{"id": ..., "tag": <numeric id>, "deck": ..., "name": "Sacrifice",
+"position": "M-500000"}`, and some already-stored `PopularDeck` rows had
+this dict shape, tripping Pydantic's `list[str]` validation on every read
+regardless of which specific row triggered it. Fixed at both layers: (1)
+`PopularDeckRead` gained a `field_validator("tags", mode="before")` that
+extracts the real name from a dict entry (`.get("name")`) or keeps a
+plain string, dropping anything else - this alone fixes already-stored
+malformed rows without needing a resync; (2) `archidekt.py` gained
+`_extract_tag_names()` doing the same dual-shape extraction at ingestion,
+so future syncs never store the dict shape to begin with. Verified live
+through the real nginx proxy: `sort=views` returns HTTP 200 with 18,311
+decks, real tag names extracted correctly (e.g. "Baby Lasagna" ->
+["Sacrifice", "Aristocrats", "Lands Matter", "Reanimator"], matching a
+direct raw API dump). Deployed via `backend` alone, deliberately not
+touching `worker` - a 90,733-candidate CubeCobra full import (see below)
+was actively running on it and would have been interrupted for no reason,
+since this particular fix only affects the read path, not anything the
+worker executes. General lesson, same shape as gotcha #34's CSV-column
+drift: a third-party API's field shape isn't a fixed contract - a change
+(or a shape CardForge's original integration simply never actually
+verified) can surface anywhere in a large, varied real dataset before it
+ever shows up in a small hand-written test fixture.
+
 Repo: `https://github.com/urza-lab/cardforge` (public). Tags `v0.1.0-phase1`
 through `v0.1.3-phase1` mark the incremental Phase 1 fixes described below.
 The LXC has its own push access — SSH deploy key
