@@ -8,6 +8,13 @@
 # Optional external TLS: see the commented-out `caddy` service at the bottom
 # and caddy/Caddyfile.example — most users should instead point their own
 # reverse proxy (e.g. a separate Caddy/Nginx instance) at host:666.
+#
+# Per-service `cpus`/`mem_limit` are set below (added after a real incident:
+# an unbounded worker job on a 2-vCPU host starved the entire LXC — including
+# sshd and dockerd themselves — for ~40 minutes before it hard-crashed; see
+# CLAUDE.md). No single container can peg both cores or exhaust host RAM
+# regardless of what a runaway sync/import job does. Sized for a 2 vCPU /
+# 8GB host — raise them if the host has more to give.
 
 x-backend-image: &backend-image
   build:
@@ -64,6 +71,8 @@ services:
       - ${CARDFORGE_DATA_DIR:-./data}/prometheus:/data/prometheus
       - ${CARDFORGE_DATA_DIR:-./data}/grafana:/data/grafana
     restart: "no"
+    cpus: 0.25
+    mem_limit: 128m
 
   postgres:
     image: postgres:16-alpine
@@ -85,6 +94,9 @@ services:
       retries: 10
       start_period: 10s
     restart: unless-stopped
+    cpus: 0.75
+    mem_limit: 1.5g
+    mem_reservation: 512m
 
   redis:
     image: redis:7-alpine
@@ -100,6 +112,8 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    cpus: 0.25
+    mem_limit: 256m
 
   backend:
     <<: *backend-image
@@ -117,6 +131,8 @@ services:
       - ${CARDFORGE_DATA_DIR:-./data}/secrets:/data/secrets:ro
       - ${CARDFORGE_DATA_DIR:-./data}/scryfall_cache:/data/scryfall_cache
     restart: unless-stopped
+    cpus: 0.75
+    mem_limit: 1g
 
   # Background job processor (RQ, using Redis as the broker): Scryfall bulk
   # sync, source refresh jobs (Phase 5), price refresh queue (Phase 6).
@@ -145,6 +161,11 @@ services:
       - ${CARDFORGE_DATA_DIR:-./data}/secrets:/data/secrets:ro
       - ${CARDFORGE_DATA_DIR:-./data}/scryfall_cache:/data/scryfall_cache
     restart: unless-stopped
+    # Deliberately capped below a full core: this is the container that ran
+    # the full-cube-import job which starved the whole host — see the
+    # comment at the top of this file.
+    cpus: 0.75
+    mem_limit: 1.5g
 
   frontend:
     build:
@@ -155,6 +176,8 @@ services:
     ports:
       - "${CARDFORGE_HOST_PORT:-666}:80"
     restart: unless-stopped
+    cpus: 0.25
+    mem_limit: 128m
 
   # --- Optional observability stack (Phase 7). Disabled by default. ---
   # Start with: docker compose --profile observability up -d
@@ -169,6 +192,8 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ${CARDFORGE_DATA_DIR:-./data}/prometheus:/prometheus
     restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 512m
 
   grafana:
     image: grafana/grafana-oss:11.4.0
@@ -204,6 +229,8 @@ services:
     ports:
       - "${GRAFANA_HOST_PORT:-3000}:3000"
     restart: unless-stopped
+    cpus: 0.5
+    mem_limit: 512m
 
   # --- Optional: run Caddy as part of this stack instead of an external
   # instance, to terminate TLS in front of the frontend container. Disabled

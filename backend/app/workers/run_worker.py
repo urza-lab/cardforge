@@ -25,11 +25,13 @@ import time
 
 from redis import Redis
 from rq import Queue, SimpleWorker
+from rq.worker import Worker as RQWorker
 
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
 QUEUE_NAMES = ["default", "refresh", "pricing"]
+WORKER_NAME = "cardforge-worker"
 
 # How often the staleness sweep runs. Lists go stale after 7 days (see
 # app.services.list_refresh_service.STALE_AFTER) - checking every few hours
@@ -91,6 +93,26 @@ def _periodic_data_sync_loop(interval_seconds: int) -> None:
         time.sleep(interval_seconds)
 
 
+def _clear_stale_worker_registration(conn: Redis, name: str) -> None:
+    """A hard kill (docker stop's grace period expiring mid-job, an LXC
+    crash) skips RQ's normal register_death() cleanup and leaves this
+    worker's own rq:worker:<name> registration behind - the next start then
+    fails outright with "There exists an active worker named '<name>'
+    already" (ValueError from register_birth()), crash-looping forever since
+    nothing ever clears it on its own. Confirmed live twice in one real
+    session (see CLAUDE.md gotcha #38): once after an LXC crash, and again
+    immediately after, when recreating this very container for an unrelated
+    docker-compose.yml change killed the old process before its warm
+    shutdown finished. Safe to unconditionally clear on every startup since
+    there is only ever one process using this exact worker name in this
+    deployment - any registration found here is necessarily stale, never a
+    live sibling.
+    """
+    key = f"{RQWorker.redis_worker_namespace_prefix}{name}"
+    conn.delete(key)
+    conn.srem(RQWorker.redis_workers_keys, key)
+
+
 def main() -> None:
     configure_logging()
     log = logging.getLogger("cardforge.worker")
@@ -99,6 +121,7 @@ def main() -> None:
     conn = Redis.from_url(settings.redis_url())
     conn.ping()  # fail fast and loudly if Redis is not reachable
     log.info("connected to redis at %s, listening on queues: %s", settings.redis_url(), QUEUE_NAMES)
+    _clear_stale_worker_registration(conn, WORKER_NAME)
 
     threading.Thread(target=_staleness_sweep_loop, args=(conn,), daemon=True).start()
 
@@ -127,7 +150,7 @@ def main() -> None:
     # job crash could in principle take the whole process down with it) is
     # acceptable here since every job function already wraps its own DB
     # session in try/finally and none of them are expected to segfault.
-    worker = SimpleWorker(queues, connection=conn, name="cardforge-worker")
+    worker = SimpleWorker(queues, connection=conn, name=WORKER_NAME)
     worker.work(with_scheduler=True)
 
 
