@@ -132,7 +132,16 @@ services:
       - ${CARDFORGE_DATA_DIR:-./data}/scryfall_cache:/data/scryfall_cache
     restart: unless-stopped
     cpus: 0.75
-    mem_limit: 1g
+    # Raised from 1g (found live, 2026-08-19): the Dashboard/leverage
+    # computation OOM-killed the container within ~8s once the real
+    # collection passed 82,000 lists (the full CubeCobra import completing)
+    # - confirmed via docker stats climbing 216MB -> 754MB+ before the kill.
+    # The 1g ceiling was sized against the ~1,445-18,312-list scale gotchas
+    # #32/#33/#36 were verified against; it was never re-checked after a
+    # scale-up this large. 3g leaves comfortable headroom on this 8GB host
+    # (worker 1.5g + postgres 1.5g + backend 3g + redis 256m + frontend
+    # 128m ~= 6.4g, still leaving ~1.6g for the host OS and Docker itself).
+    mem_limit: 3g
 
   # Background job processor (RQ, using Redis as the broker): Scryfall bulk
   # sync, source refresh jobs (Phase 5), price refresh queue (Phase 6).

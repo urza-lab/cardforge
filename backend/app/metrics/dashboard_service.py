@@ -12,19 +12,30 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from app.comparison import ComparisonSettings, LeverageCandidate, compute_leverage
-from app.comparison.engine import build_owned_pool, compare_pool
-from app.comparison.types import MissingCard, RequiredCard
+from app.comparison import LeverageCandidate
+from app.comparison.engine import build_owned_pool
 from app.models.collection import CollectionItem
 from app.models.lists import CardList
 from app.models.pricing import PriceProvider, PriceSyncState
 from app.models.scryfall import SYNC_STATE_ID, ScryfallSyncState
 from app.models.user import DEFAULT_USER_ID
 from app.services import collection_service, pricing_service
-from app.services.comparison_service import _owned_cards, required_cards_by_list
+from app.services.comparison_service import REQUIRED_LIST_SECTIONS, _owned_cards
+
+# Every query below groups card_list_items by this same expression - oracle_id
+# when resolved, else a normalized-name fallback - to match exactly what
+# `app.comparison.engine._oracle_key` groups on in the (still correct, still
+# used for smaller inputs) pure-Python comparison engine. Written once here
+# and interpolated into each query's `required` CTE rather than copy-pasted,
+# so the three queries can never drift out of sync with each other or with
+# `_oracle_key`.
+_KEY_EXPR_SQL = (
+    "COALESCE(cli.resolved_oracle_id, 'name::' || "
+    "regexp_replace(trim(lower(cli.card_name)), '\\s+', ' ', 'g'))"
+)
 
 # The leverage computation itself (app.comparison.leverage) doesn't get any
 # more expensive by returning more of its already-computed candidates - the
@@ -58,9 +69,16 @@ class ListBuildability:
     coverage_percent: float
     is_fully_buildable: bool
     # In-memory only - not part of ListBuildabilityRead (app/schemas/dashboard.py
-    # whitelists fields explicitly), kept here so compute_list_missing_cost
-    # below doesn't need to re-run compare() from scratch for the same list.
-    missing: list[MissingCard] = field(default_factory=list, repr=False, compare=False)
+    # whitelists fields explicitly). No longer holds per-card missing detail
+    # (an earlier version did, for compute_list_missing_cost/
+    # compute_leverage_at_scale to reuse without re-querying - see CLAUDE.md
+    # 2026-08-20: even a compact per-entry tuple representation still OOM'd a
+    # 3GB container once retained for all ~84,000 lists at once, since a
+    # bulk-imported cube the user never owned has "missing" almost as large
+    # as "required". Those two functions now get everything they need from
+    # their own SQL aggregations instead, so this dataclass only needs to
+    # carry per-list *summary* numbers, not per-card detail.
+    total_required_quantity: int = field(default=0, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -128,46 +146,238 @@ class DashboardSummary:
     refresh_eta_seconds: float | None = None
 
 
+# A real, live OOM (2026-08-19): once the collection passed 82,000 real
+# lists (the full CubeCobra import completing), the old version of this
+# function fetched *every* required-card row for *every* list into one
+# giant Python dict before processing any of them (see gotcha history in
+# CLAUDE.md) - tens of millions of RequiredCard objects held at once, which
+# no longer fits even a raised 3GB container limit. Processing lists in
+# bounded batches keeps the working set at any moment proportional to
+# batch size, not total collection size, regardless of how large the real
+# list count grows.
+def _owned_pool_arrays(owned_pool: dict[str, int]) -> tuple[list[str], list[int]]:
+    keys = list(owned_pool.keys())
+    return keys, [owned_pool[k] for k in keys]
+
+
 def compute_list_buildability(
     db: Session, *, user_id: int = DEFAULT_USER_ID
-) -> tuple[list[ListBuildability], dict[int, list[RequiredCard]]]:
+) -> list[ListBuildability]:
     """Split out of `get_dashboard_summary` so callers that only need
     per-list coverage (the Prometheus exporter) don't also pay for the
     leverage computation below, which is meaningfully more expensive
     (O(candidates x lists), see `app.comparison.leverage`) and would
     otherwise run on every Prometheus scrape for no reason.
+
+    A real, live OOM (2026-08-19/20): once the collection passed 82,000
+    real lists (the full CubeCobra import completing), the old version of
+    this function - and `compute_leverage_at_scale`/`compute_list_missing_
+    cost` below - worked by fetching every required-card row into Python
+    RequiredCard/MissingCard objects (or even a leaner compact tuple form)
+    and iterating them in `app.comparison.engine.compare_pool`. That
+    doesn't scale to a real ~37 million-row `card_list_items` table no
+    matter how lean the per-row Python representation gets: a bulk-
+    imported cube the user never owned has "missing" almost as large as
+    "required", so the *retained* per-list output alone was enough to OOM
+    a 3GB container. This version pushes the entire aggregation into one
+    SQL query instead - Postgres processes the 37M rows internally (no
+    per-row Python object ever created) and only ships back one row per
+    *list* (bounded by list count, not row count).
+
+    Mathematically equivalent to the old per-row compare_pool() loop, not
+    an approximation of it: `compare_pool` only ever depends on the *sum*
+    of required quantities per candidate key against the owned pool
+    (`applied = min(available, quantity)` against a running total), never
+    on how that sum was split across individual required-card lines - see
+    `_KEY_EXPR_SQL`'s own note on matching `app.comparison.engine.
+    _oracle_key`'s exact grouping.
     """
     collection = collection_service.get_or_create_default_collection(db, user_id=user_id)
     lists = list(db.scalars(select(CardList).where(CardList.user_id == user_id)))
     owned = _owned_cards(db, collection.id)
-    settings = ComparisonSettings(mode="oracle")
-    # Built once and reused read-only across every list's compare_pool()
-    # call below (see engine.build_owned_pool/compare_pool's own
-    # docstrings) - compare()'s own per-call pool rebuild is the dominant
-    # cost once there are hundreds of lists, not the comparison itself.
-    owned_pool = build_owned_pool(owned, settings.mode)
+    owned_pool = build_owned_pool(owned, "oracle")
+    okeys, oquantities = _owned_pool_arrays(owned_pool)
 
-    lists_required = required_cards_by_list(db, [card_list.id for card_list in lists])
+    rows = db.execute(
+        text(f"""
+            WITH owned(okey, oqty) AS (
+                SELECT * FROM unnest(CAST(:okeys AS text[]), CAST(:oquantities AS integer[]))
+            ),
+            required AS (
+                SELECT
+                    cli.list_id,
+                    {_KEY_EXPR_SQL} AS key,
+                    SUM(cli.quantity) AS req_qty
+                FROM card_list_items cli
+                JOIN card_lists cl ON cl.id = cli.list_id
+                WHERE cl.user_id = :user_id AND cli.section = ANY(CAST(:sections AS text[]))
+                GROUP BY cli.list_id, key
+            )
+            SELECT
+                r.list_id AS list_id,
+                SUM(r.req_qty)::bigint AS total_required_quantity,
+                SUM(LEAST(r.req_qty, COALESCE(o.oqty, 0)))::bigint AS total_owned_applied,
+                COUNT(*) FILTER (WHERE r.req_qty > COALESCE(o.oqty, 0)) AS distinct_missing_count
+            FROM required r
+            LEFT JOIN owned o ON o.okey = r.key
+            GROUP BY r.list_id
+        """),
+        {
+            "okeys": okeys,
+            "oquantities": oquantities,
+            "user_id": user_id,
+            "sections": sorted(REQUIRED_LIST_SECTIONS),
+        },
+    )
+    # Lists with zero required cards never appear in `required` (nothing to
+    # GROUP BY), so they're absent from the query result entirely - default
+    # them to "nothing required, trivially fully buildable", matching what
+    # compare_pool([]) would return (total_required_quantity=0 -> coverage
+    # 100.0, missing=[] -> is_fully_buildable=True).
+    by_list_id = {row.list_id: row for row in rows}
 
     list_buildability: list[ListBuildability] = []
     for card_list in lists:
-        required = lists_required[card_list.id]
-        result = compare_pool(owned_pool, required, settings)
+        row = by_list_id.get(card_list.id)
+        if row is None:
+            coverage_percent, is_fully_buildable, total_required_quantity = 100.0, True, 0
+        else:
+            total_required_quantity = row.total_required_quantity
+            coverage_percent = (
+                round(row.total_owned_applied / total_required_quantity * 100, 2) if total_required_quantity else 100.0
+            )
+            is_fully_buildable = row.distinct_missing_count == 0
         list_buildability.append(
             ListBuildability(
                 list_id=card_list.id,
                 name=card_list.name,
                 list_type=card_list.list_type,
-                coverage_percent=result.coverage_percent,
-                is_fully_buildable=result.is_fully_buildable,
-                missing=result.missing,
+                coverage_percent=coverage_percent,
+                is_fully_buildable=is_fully_buildable,
+                total_required_quantity=total_required_quantity,
             )
         )
-    return list_buildability, lists_required
+    return list_buildability
+
+
+def compute_leverage_at_scale(db: Session, owned_pool: dict[str, int], *, user_id: int = DEFAULT_USER_ID) -> list[LeverageCandidate]:
+    """Same ranking `app.comparison.leverage.compute_leverage` produces,
+    restructured to scale to a real ~85,000-list, ~37-million-row
+    collection (2026-08-19/20) - see `compute_list_buildability`'s own
+    docstring for why holding per-row or even per-list-per-candidate detail
+    in Python doesn't work at this scale, OOM or not. `compute_leverage`
+    itself is left untouched as the correct, pure, general implementation
+    (still used by anything working with a smaller or already-in-memory
+    `lists_required` mapping); this is a dashboard-specific fast path for
+    the one real caller that now needs to handle the full collection.
+
+    One SQL query computes everything needed per *candidate key* - the
+    aggregate demand (for `quantity_needed`), how many lists have this as
+    their *only* missing card (`lists_newly_buildable`), and the summed
+    per-list coverage-gain contribution (`total_coverage_gain`) - entirely
+    server-side. The result is bounded by distinct candidate count (~50,000
+    real, confirmed live), not by list count or row count.
+    """
+    okeys, oquantities = _owned_pool_arrays(owned_pool)
+
+    rows = db.execute(
+        text(f"""
+            WITH owned(okey, oqty) AS (
+                SELECT * FROM unnest(CAST(:okeys AS text[]), CAST(:oquantities AS integer[]))
+            ),
+            required AS (
+                SELECT
+                    cli.list_id,
+                    {_KEY_EXPR_SQL} AS key,
+                    MAX(cli.card_name) AS name,
+                    MAX(cli.resolved_oracle_id) AS oracle_id,
+                    MAX(cli.resolved_scryfall_card_id) AS scryfall_card_id,
+                    SUM(cli.quantity) AS req_qty
+                FROM card_list_items cli
+                JOIN card_lists cl ON cl.id = cli.list_id
+                WHERE cl.user_id = :user_id AND cli.section = ANY(CAST(:sections AS text[]))
+                GROUP BY cli.list_id, key
+            ),
+            list_totals AS (
+                SELECT list_id, SUM(req_qty) AS total_required_quantity
+                FROM required GROUP BY list_id
+            ),
+            shortfalls AS (
+                SELECT
+                    r.list_id,
+                    r.key,
+                    GREATEST(r.req_qty - COALESCE(o.oqty, 0), 0) AS shortfall,
+                    lt.total_required_quantity
+                FROM required r
+                LEFT JOIN owned o ON o.okey = r.key
+                JOIN list_totals lt ON lt.list_id = r.list_id
+                WHERE r.req_qty > COALESCE(o.oqty, 0)
+            ),
+            list_missing_counts AS (
+                SELECT list_id, COUNT(*) AS distinct_missing_count
+                FROM shortfalls GROUP BY list_id
+            ),
+            key_totals AS (
+                SELECT
+                    key,
+                    MAX(name) AS name,
+                    MAX(oracle_id) AS oracle_id,
+                    MAX(scryfall_card_id) AS scryfall_card_id,
+                    SUM(req_qty)::bigint AS total_quantity
+                FROM required GROUP BY key
+            )
+            SELECT
+                kt.key,
+                kt.name,
+                kt.oracle_id,
+                kt.scryfall_card_id,
+                kt.total_quantity,
+                COALESCE(agg.lists_newly_buildable, 0) AS lists_newly_buildable,
+                COALESCE(agg.total_coverage_gain, 0) AS total_coverage_gain
+            FROM key_totals kt
+            LEFT JOIN (
+                SELECT
+                    s.key,
+                    COUNT(*) FILTER (WHERE lmc.distinct_missing_count = 1) AS lists_newly_buildable,
+                    SUM(
+                        CASE WHEN s.total_required_quantity > 0
+                        THEN s.shortfall::float / s.total_required_quantity * 100 ELSE 0 END
+                    ) AS total_coverage_gain
+                FROM shortfalls s
+                JOIN list_missing_counts lmc ON lmc.list_id = s.list_id
+                GROUP BY s.key
+            ) agg ON agg.key = kt.key
+        """),
+        {
+            "okeys": okeys,
+            "oquantities": oquantities,
+            "user_id": user_id,
+            "sections": sorted(REQUIRED_LIST_SECTIONS),
+        },
+    )
+
+    candidates: list[LeverageCandidate] = []
+    for row in rows:
+        aggregate_shortfall = max(row.total_quantity - owned_pool.get(row.key, 0), 0)
+        if aggregate_shortfall <= 0:
+            continue
+        candidates.append(
+            LeverageCandidate(
+                name=row.name,
+                oracle_id=row.oracle_id,
+                scryfall_card_id=row.scryfall_card_id,
+                quantity_needed=aggregate_shortfall,
+                lists_newly_buildable=row.lists_newly_buildable,
+                total_coverage_gain=round(row.total_coverage_gain, 2),
+            )
+        )
+
+    candidates.sort(key=lambda c: (c.lists_newly_buildable, c.total_coverage_gain), reverse=True)
+    return candidates
 
 
 def compute_list_missing_cost(
-    db: Session, list_buildability: list[ListBuildability], *, user_id: int = DEFAULT_USER_ID
+    db: Session, list_buildability: list[ListBuildability], owned_pool: dict[str, int], *, user_id: int = DEFAULT_USER_ID
 ) -> list[ListMissingCost]:
     """Total cost to complete each list (sum of missing-card prices), using
     the user's default price profile - real market prices only (Scryfall/
@@ -177,45 +387,104 @@ def compute_list_missing_cost(
     understate the real cost, so it's omitted entirely rather than shown as
     a misleadingly low number.
 
-    Deliberately NOT built on pricing_service.price_missing_cards/
-    resolve_cheapest_price_for_oracle - those do one (or several) DB
-    round-trips per missing card, which is fine for their actual callers (a
-    single list's own comparison page, on demand) but was confirmed live to
-    take minutes across a real collection's real decks when run for every
-    list on every call here - this is reached from the Prometheus exporter,
-    scraped on a timer, so it needs to stay a small constant number of
-    queries regardless of how many cards are missing across how many lists.
+    `list_buildability` is only used here for its `name`/`list_type` per
+    list_id (a tiny lookup) - see `compute_list_buildability`'s own
+    docstring for why the missing-card detail itself is computed via SQL
+    below instead of Python-side, same reasoning as
+    `compute_leverage_at_scale`.
     """
     profile = pricing_service.get_or_create_default_price_profile(db, user_id=user_id)
 
-    oracle_ids = {m.oracle_id for lb in list_buildability for m in lb.missing if m.oracle_id}
-    direct_card_ids = {
-        m.scryfall_card_id for lb in list_buildability for m in lb.missing if not m.oracle_id and m.scryfall_card_id
-    }
+    # Distinct candidate keys collection-wide, with their oracle_id/
+    # scryfall_card_id, needed to look up real prices - reuses the exact
+    # same aggregation shape `compute_leverage_at_scale` already needs, but
+    # only pulls the small (key, oracle_id, scryfall_card_id) columns since
+    # pricing doesn't need per-list detail either.
+    key_rows = db.execute(
+        text(f"""
+            SELECT
+                {_KEY_EXPR_SQL} AS key,
+                MAX(cli.resolved_oracle_id) AS oracle_id,
+                MAX(cli.resolved_scryfall_card_id) AS scryfall_card_id
+            FROM card_list_items cli
+            JOIN card_lists cl ON cl.id = cli.list_id
+            WHERE cl.user_id = :user_id AND cli.section = ANY(CAST(:sections AS text[]))
+            GROUP BY key
+        """),
+        {"user_id": user_id, "sections": sorted(REQUIRED_LIST_SECTIONS)},
+    ).all()
+
+    oracle_ids = {r.oracle_id for r in key_rows if r.oracle_id}
+    direct_card_ids = {r.scryfall_card_id for r in key_rows if not r.oracle_id and r.scryfall_card_id}
     price_by_oracle, price_by_direct = pricing_service.batch_cheapest_prices(db, oracle_ids, direct_card_ids, profile)
 
-    def price_for(missing: MissingCard) -> Decimal | None:
-        if missing.oracle_id:
-            return price_by_oracle.get(missing.oracle_id)
-        if missing.scryfall_card_id:
-            return price_by_direct.get(missing.scryfall_card_id)
-        return None
+    price_by_key: dict[str, Decimal] = {}
+    for r in key_rows:
+        price = price_by_oracle.get(r.oracle_id) if r.oracle_id else None
+        if price is None and r.scryfall_card_id:
+            price = price_by_direct.get(r.scryfall_card_id)
+        if price is not None:
+            price_by_key[r.key] = price
 
-    results: list[ListMissingCost] = []
-    for lb in list_buildability:
-        total = Decimal(0)
-        fully_priced = True
-        for m in lb.missing:
-            price = price_for(m)
-            if price is None:
-                fully_priced = False
-                break
-            total += price * m.missing_quantity
-        if fully_priced:
-            results.append(
-                ListMissingCost(list_id=lb.list_id, name=lb.name, list_type=lb.list_type, total_cost=total, currency=profile.currency)
+    if not price_by_key:
+        return []
+    pkeys, pvalues = zip(*price_by_key.items(), strict=True)
+    okeys, oquantities = _owned_pool_arrays(owned_pool)
+
+    rows = db.execute(
+        text(f"""
+            WITH owned(okey, oqty) AS (
+                SELECT * FROM unnest(CAST(:okeys AS text[]), CAST(:oquantities AS integer[]))
+            ),
+            prices(pkey, price) AS (
+                SELECT unnest(CAST(:pkeys AS text[])), unnest(CAST(:pvalues AS text[]))::numeric
+            ),
+            required AS (
+                SELECT
+                    cli.list_id,
+                    {_KEY_EXPR_SQL} AS key,
+                    SUM(cli.quantity) AS req_qty
+                FROM card_list_items cli
+                JOIN card_lists cl ON cl.id = cli.list_id
+                WHERE cl.user_id = :user_id AND cli.section = ANY(CAST(:sections AS text[]))
+                GROUP BY cli.list_id, key
+            ),
+            shortfalls AS (
+                SELECT
+                    r.list_id,
+                    r.key,
+                    GREATEST(r.req_qty - COALESCE(o.oqty, 0), 0) AS shortfall
+                FROM required r
+                LEFT JOIN owned o ON o.okey = r.key
+                WHERE r.req_qty > COALESCE(o.oqty, 0)
             )
+            SELECT
+                s.list_id,
+                SUM(s.shortfall * COALESCE(p.price, 0)) AS total_cost
+            FROM shortfalls s
+            LEFT JOIN prices p ON p.pkey = s.key
+            GROUP BY s.list_id
+            HAVING COUNT(*) FILTER (WHERE p.price IS NULL) = 0
+        """),
+        {
+            "okeys": okeys,
+            "oquantities": oquantities,
+            "pkeys": list(pkeys),
+            "pvalues": [str(v) for v in pvalues],
+            "user_id": user_id,
+            "sections": sorted(REQUIRED_LIST_SECTIONS),
+        },
+    )
 
+    lb_by_id = {lb.list_id: lb for lb in list_buildability}
+    results: list[ListMissingCost] = []
+    for row in rows:
+        lb = lb_by_id.get(row.list_id)
+        if lb is None:
+            continue  # a list deleted between the two queries - real but rare race, just skip it
+        results.append(
+            ListMissingCost(list_id=lb.list_id, name=lb.name, list_type=lb.list_type, total_cost=row.total_cost, currency=profile.currency)
+        )
     return results
 
 
@@ -268,8 +537,8 @@ def get_dashboard_summary(db: Session, user_id: int = DEFAULT_USER_ID) -> Dashbo
     ).one()
 
     owned = _owned_cards(db, collection.id)
-    settings = ComparisonSettings(mode="oracle")
-    list_buildability, lists_required = compute_list_buildability(db, user_id=user_id)
+    owned_pool = build_owned_pool(owned, "oracle")
+    list_buildability = compute_list_buildability(db, user_id=user_id)
 
     lists_fully_buildable = sum(1 for lb in list_buildability if lb.is_fully_buildable)
     average_coverage = (
@@ -278,10 +547,12 @@ def get_dashboard_summary(db: Session, user_id: int = DEFAULT_USER_ID) -> Dashbo
         else 0.0
     )
     leverage_candidates = [
-        c for c in compute_leverage(owned, lists_required, settings) if c.name.strip().lower() not in _BASIC_LAND_NAMES
+        c
+        for c in compute_leverage_at_scale(db, owned_pool, user_id=user_id)
+        if c.name.strip().lower() not in _BASIC_LAND_NAMES
     ]
     top_leverage = price_leverage_candidates(db, leverage_candidates[:TOP_LEVERAGE_COUNT], user_id=user_id)
-    list_missing_cost = compute_list_missing_cost(db, list_buildability, user_id=user_id)
+    list_missing_cost = compute_list_missing_cost(db, list_buildability, owned_pool, user_id=user_id)
 
     scryfall_state = db.get(ScryfallSyncState, SYNC_STATE_ID)
     mtgjson_state = db.get(PriceSyncState, PriceProvider.mtgjson.value)

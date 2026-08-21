@@ -11,6 +11,7 @@ resolve, compare, respond, done in one request.
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -129,20 +130,41 @@ def _owned_cards(db: Session, collection_id: int) -> list[OwnedCard]:
 
 
 def _required_cards_for_lists(db: Session, list_ids: list[int]) -> list[RequiredCard]:
-    list_items = db.scalars(
-        select(CardListItem).where(
-            CardListItem.list_id.in_(list_ids), CardListItem.section.in_(REQUIRED_LIST_SECTIONS)
+    required: list[RequiredCard] = []
+    for chunk in _chunked_ids(list_ids):
+        list_items = db.scalars(
+            select(CardListItem).where(
+                CardListItem.list_id.in_(chunk), CardListItem.section.in_(REQUIRED_LIST_SECTIONS)
+            )
         )
-    )
-    return [
-        RequiredCard(
-            name=item.card_name,
-            quantity=item.quantity,
-            oracle_id=item.resolved_oracle_id,
-            scryfall_card_id=item.resolved_scryfall_card_id,
+        required.extend(
+            RequiredCard(
+                name=item.card_name,
+                quantity=item.quantity,
+                oracle_id=item.resolved_oracle_id,
+                scryfall_card_id=item.resolved_scryfall_card_id,
+            )
+            for item in list_items
         )
-        for item in list_items
-    ]
+    return required
+
+
+# Postgres hard-caps a single query at 65535 bound parameters - an IN(...)
+# clause built directly from every list_id in the collection can exceed
+# that once the real list count grows large enough (confirmed live: the
+# 2026-08-19 full CubeCobra import pushed the real collection past 82,000
+# lists and made this exact query fail outright with "number of parameters
+# must be between 0 and 65535", breaking both the Dashboard and every
+# Prometheus /metrics scrape - see CLAUDE.md gotcha #33 for the same
+# ceiling hit once before on a different IN clause). Chunking well under
+# the ceiling keeps every batch safe regardless of how large the real list
+# count grows.
+_LIST_ID_CHUNK_SIZE = 5000
+
+
+def _chunked_ids(ids: list[int], size: int = _LIST_ID_CHUNK_SIZE) -> Iterator[list[int]]:
+    for start in range(0, len(ids), size):
+        yield ids[start : start + size]
 
 
 def required_cards_by_list(db: Session, list_ids: list[int]) -> dict[int, list[RequiredCard]]:
@@ -157,26 +179,29 @@ def required_cards_by_list(db: Session, list_ids: list[int]) -> dict[int, list[R
     confirmed live to take ~11s once real usage pushed a real collection
     past 500 lists (a bulk "select all" cube import - see CLAUDE.md).
     """
-    # Plain columns, not full CardListItem ORM entities - at real scale
-    # (hundreds of lists, hundreds of thousands of rows) hydrating a full
-    # mapped object per row is itself the dominant cost of this function,
-    # confirmed live to take ~8s on its own even after this was already
-    # one query instead of one-per-list (see CLAUDE.md) - a plain tuple
-    # row needs no identity-map/relationship bookkeeping.
-    rows = db.execute(
-        select(
-            CardListItem.list_id,
-            CardListItem.card_name,
-            CardListItem.quantity,
-            CardListItem.resolved_oracle_id,
-            CardListItem.resolved_scryfall_card_id,
-        ).where(CardListItem.list_id.in_(list_ids), CardListItem.section.in_(REQUIRED_LIST_SECTIONS))
-    )
     grouped: dict[int, list[RequiredCard]] = {list_id: [] for list_id in list_ids}
-    for list_id, card_name, quantity, oracle_id, scryfall_card_id in rows:
-        grouped[list_id].append(
-            RequiredCard(name=card_name, quantity=quantity, oracle_id=oracle_id, scryfall_card_id=scryfall_card_id)
+    for chunk in _chunked_ids(list_ids):
+        # Plain columns, not full CardListItem ORM entities - at real scale
+        # (hundreds of lists, hundreds of thousands of rows) hydrating a full
+        # mapped object per row is itself the dominant cost of this function,
+        # confirmed live to take ~8s on its own even after this was already
+        # one query instead of one-per-list (see CLAUDE.md) - a plain tuple
+        # row needs no identity-map/relationship bookkeeping.
+        rows = db.execute(
+            select(
+                CardListItem.list_id,
+                CardListItem.card_name,
+                CardListItem.quantity,
+                CardListItem.resolved_oracle_id,
+                CardListItem.resolved_scryfall_card_id,
+            ).where(CardListItem.list_id.in_(chunk), CardListItem.section.in_(REQUIRED_LIST_SECTIONS))
         )
+        for list_id, card_name, quantity, oracle_id, scryfall_card_id in rows:
+            grouped[list_id].append(
+                RequiredCard(
+                    name=card_name, quantity=quantity, oracle_id=oracle_id, scryfall_card_id=scryfall_card_id
+                )
+            )
     return grouped
 
 
