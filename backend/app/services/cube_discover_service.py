@@ -307,29 +307,52 @@ def run_full_cube_scrape(db: Session, settings: Settings | None = None) -> CubeF
 
 
 # Real, user-requested bulk-import candidate rule (see CLAUDE.md) - a cube
-# qualifies once it has real substance (>= 40 cards) AND is either popular
-# enough (top N by one of CubeCobra's 3 real popularity signals - there is
-# no real "views" field, confirmed live) or has other evidence of being a
-# real, cared-for cube (an owner with real followers, or a written
-# description) rather than one of the many auto-named, unmaintained cubes
-# the full catalog scrape also picked up.
-FULL_IMPORT_MIN_CARD_COUNT = 40
+# qualifies once it has real substance (>= 180 cards, raised from the
+# original 40 after the user asked to exclude undersized cubes - 180 is
+# below every common real cube size CLAUDE.md's own live distribution check
+# found (360/540/180/450 are the most common exact sizes), so it only
+# excludes genuinely small/incomplete cubes, not the smaller end of
+# legitimate ones) AND is either popular enough (top N by one of
+# CubeCobra's 3 real popularity signals - there is no real "views" field,
+# confirmed live) or has other evidence of being a real, cared-for cube (an
+# owner with real followers, or a written description) rather than one of
+# the many auto-named, unmaintained cubes the full catalog scrape also
+# picked up.
+FULL_IMPORT_MIN_CARD_COUNT = 180
 FULL_IMPORT_TOP_N_PER_CATEGORY = 10_000
 FULL_IMPORT_MIN_FOLLOWERS = 5
 
 
-def _full_import_candidates_select(min_id: int | None = None, top_n: int = FULL_IMPORT_TOP_N_PER_CATEGORY):
+def _full_import_candidates_select(
+    min_id: int | None = None,
+    *,
+    min_card_count: int = FULL_IMPORT_MIN_CARD_COUNT,
+    max_card_count: int | None = None,
+    require_description: bool = False,
+    top_n: int = FULL_IMPORT_TOP_N_PER_CATEGORY,
+):
     """Ranks the whole `popular_cubes` table by each of the 3 real
     popularity signals CubeCobra exposes (like_count/num_decks/
     owner_follower_count - "most viewed" was requested but CubeCobra has no
     real per-cube view counter, confirmed live by dumping a full raw cube
     object: the only `views` key is a display-layout config, not a
-    counter) and selects ids that are either in the top
-    FULL_IMPORT_TOP_N_PER_CATEGORY of any of those 3, or have
-    >= FULL_IMPORT_MIN_FOLLOWERS followers, or have a real description -
-    always AND'd with the >= FULL_IMPORT_MIN_CARD_COUNT floor. Window
-    functions are recomputed on every call rather than cached - acceptable
-    since this only runs once per (re)trigger, not per candidate.
+    counter).
+
+    User-requested filters (2026-08-21, after the default-scope run
+    imported 82,309 of 90,932 candidates - see CLAUDE.md): `min_card_count`/
+    `max_card_count` bound real card count; `require_description`, when
+    True, *replaces* the popularity-OR-description qualification below with
+    a strict "must have a real description" requirement (AND'd with the
+    card-count bounds) instead of just being one of several ways to
+    qualify - the whole point of checking this box is to *narrow* scope to
+    curated-looking cubes, which the old "description OR popular" logic
+    would silently defeat by still admitting every popular cube regardless.
+    When False, the original behavior is unchanged: a cube qualifies if
+    it's in the top `top_n` of any of the 3 popularity ranks, has
+    >= FULL_IMPORT_MIN_FOLLOWERS followers, or has a real description.
+    Window functions are recomputed on every call rather than cached -
+    acceptable since this only runs once per (re)trigger, not per
+    candidate.
     """
     likes_rank = func.rank().over(order_by=PopularCube.like_count.desc().nulls_last())
     decks_rank = func.rank().over(order_by=PopularCube.num_decks.desc().nulls_last())
@@ -344,16 +367,22 @@ def _full_import_candidates_select(min_id: int | None = None, top_n: int = FULL_
         followers_rank.label("followers_rank"),
     ).subquery("ranked_cubes")
 
-    conditions = [
-        ranked.c.card_count >= FULL_IMPORT_MIN_CARD_COUNT,
-        or_(
-            ranked.c.likes_rank <= top_n,
-            ranked.c.decks_rank <= top_n,
-            ranked.c.followers_rank <= top_n,
-            ranked.c.owner_follower_count >= FULL_IMPORT_MIN_FOLLOWERS,
-            ranked.c.description.is_not(None),
-        ),
-    ]
+    conditions = [ranked.c.card_count >= min_card_count]
+    if max_card_count is not None:
+        conditions.append(ranked.c.card_count <= max_card_count)
+
+    if require_description:
+        conditions.append(ranked.c.description.is_not(None))
+    else:
+        conditions.append(
+            or_(
+                ranked.c.likes_rank <= top_n,
+                ranked.c.decks_rank <= top_n,
+                ranked.c.followers_rank <= top_n,
+                ranked.c.owner_follower_count >= FULL_IMPORT_MIN_FOLLOWERS,
+                ranked.c.description.is_not(None),
+            )
+        )
     if min_id is not None:
         conditions.append(ranked.c.id > min_id)
     return select(ranked.c.id).where(*conditions).order_by(ranked.c.id)
@@ -366,7 +395,15 @@ def get_full_import_state(db: Session) -> CubeFullImportState:
     return state
 
 
-def trigger_full_import(db: Session) -> CubeFullImportState:
+def trigger_full_import(
+    db: Session,
+    *,
+    min_card_count: int = FULL_IMPORT_MIN_CARD_COUNT,
+    max_card_count: int | None = None,
+    require_description: bool = False,
+    top_n: int = FULL_IMPORT_TOP_N_PER_CATEGORY,
+    max_total: int | None = None,
+) -> CubeFullImportState:
     """Starts (or resumes, if `state.last_cube_id` is already set from a
     prior interrupted/failed run) the real bulk import. Unlike
     trigger_full_scrape, the candidate set here is a deterministic query
@@ -377,6 +414,16 @@ def trigger_full_import(db: Session) -> CubeFullImportState:
     deliberately NOT reset here - they're cumulative across the whole
     logical job (which may span several worker restarts/redeploys), not
     per-trigger-call, so the progress bar never jumps backwards.
+
+    The 5 filter params (user-requested, 2026-08-21) are written onto the
+    state row on *every* trigger call, including a resume - so retriggering
+    with a different scope changes what happens next without needing a
+    separate "edit filters" endpoint, and `run_full_cube_import` (which
+    actually walks candidates, possibly much later in a background job)
+    reads them back from there rather than needing them passed as RQ job
+    args. `max_total` folds into `total_candidates` here (capped at
+    whichever is smaller) so the progress bar reflects the real ceiling
+    this run will actually stop at.
     """
     state = get_full_import_state(db)
     if state.status == CubeFullImportStatus.running.value:
@@ -384,7 +431,27 @@ def trigger_full_import(db: Session) -> CubeFullImportState:
 
     from app.workers.jobs import run_full_cube_import_job
 
-    total = db.scalar(select(func.count()).select_from(_full_import_candidates_select().subquery())) or 0
+    state.filter_min_card_count = min_card_count
+    state.filter_max_card_count = max_card_count
+    state.filter_require_description = require_description
+    state.filter_top_n = top_n
+    state.filter_max_total = max_total
+
+    total = (
+        db.scalar(
+            select(func.count()).select_from(
+                _full_import_candidates_select(
+                    min_card_count=min_card_count,
+                    max_card_count=max_card_count,
+                    require_description=require_description,
+                    top_n=top_n,
+                ).subquery()
+            )
+        )
+        or 0
+    )
+    if max_total is not None:
+        total = min(total, max_total)
 
     # Same "no principled way to size this" reasoning as trigger_full_scrape
     # - a real per-cube fetch is ~2.2-2.6s (measured live), so tens of
@@ -421,10 +488,31 @@ def run_full_cube_import(db: Session, *, user_id: int = DEFAULT_USER_ID) -> Cube
     limiting at that same natural, unthrottled pace (see CLAUDE.md); this
     job can run far longer in wall-clock time but at the same real
     per-request rate, not a faster one.
+
+    Reads its filter scope (min/max card count, require_description, top_n,
+    max_total) from the state row rather than taking them as parameters -
+    see `trigger_full_import` for why (state is the one thing both the API
+    request and this later-run background job can both see).
+    `filter_max_total`, when set, stops the walk once the *cumulative*
+    processed count (imported+skipped+failed, across this whole logical
+    job, not just this call) reaches it - candidates are still walked in
+    the same `id ASC` order as always, so this is a hard ceiling on total
+    work done, not a guarantee of processing the N globally most popular
+    cubes first.
     """
     state = get_full_import_state(db)
     resume_from = state.last_cube_id
-    candidate_ids = list(db.scalars(_full_import_candidates_select(min_id=resume_from)))
+    candidate_ids = list(
+        db.scalars(
+            _full_import_candidates_select(
+                min_id=resume_from,
+                min_card_count=state.filter_min_card_count,
+                max_card_count=state.filter_max_card_count,
+                require_description=state.filter_require_description,
+                top_n=state.filter_top_n,
+            )
+        )
+    )
 
     state.status = CubeFullImportStatus.running.value
     if state.started_at is None:
@@ -435,6 +523,11 @@ def run_full_cube_import(db: Session, *, user_id: int = DEFAULT_USER_ID) -> Cube
 
     try:
         for cube_id in candidate_ids:
+            state = get_full_import_state(db)
+            processed_so_far = state.imported_count + state.skipped_count + state.failed_count
+            if state.filter_max_total is not None and processed_so_far >= state.filter_max_total:
+                break
+
             cube = db.get(PopularCube, cube_id)
             if cube is None:
                 continue

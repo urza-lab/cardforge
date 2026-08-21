@@ -39,6 +39,27 @@ class CubeFullImportStatusRead(BaseModel):
     failed_count: int
     skipped_count: int
     error_message: str | None
+    filter_min_card_count: int
+    filter_max_card_count: int | None
+    filter_require_description: bool
+    filter_top_n: int
+    filter_max_total: int | None
+
+
+class CubeFullImportTriggerRequest(BaseModel):
+    """User-requested (2026-08-21, see CLAUDE.md): lets a trigger call scope
+    the bulk import down instead of always sweeping the same broad default
+    criteria that imported 82,309 of 90,932 candidates in the run that
+    preceded this. All fields optional - omitting one keeps the same
+    default `cube_discover_service._full_import_candidates_select` always
+    used.
+    """
+
+    min_card_count: int = 180
+    max_card_count: int | None = None
+    require_description: bool = False
+    top_n: int = 10_000
+    max_total: int | None = None
 
 
 class PopularCubeRead(BaseModel):

@@ -373,7 +373,7 @@
     },
     "fullImport": {
       "title": "Vollständiger Cube-Import",
-      "description": "Lädt jeden qualifizierenden Cube aus dem Cache oben herunter und importiert ihn in deine echten Decks & Cubes — nicht nur Metadaten cachen. Ein Cube qualifiziert sich ab 40 Karten und wenn er entweder in den Top 10.000 nach Likes, gebauten Decks oder Owner-Followern liegt, der Owner ≥5 Follower hat, oder eine echte Description vorhanden ist. Resumierbar: eine Unterbrechung (Worker-Neustart, Redeploy) macht genau dort weiter, wo aufgehört wurde, statt neu zu starten oder bereits importierte Cubes erneut herunterzuladen. Die echte Gesamtzahl ist im Voraus bekannt, daher ist der Fortschritt ein echter Prozentwert.",
+      "description": "Lädt jeden qualifizierenden Cube aus dem Cache oben herunter und importiert ihn in deine echten Decks & Cubes — nicht nur Metadaten cachen. Standardmäßig qualifiziert sich ein Cube ab 180 Karten und wenn er entweder in den Top-N nach Likes, gebauten Decks oder Owner-Followern liegt, der Owner ≥5 Follower hat, oder eine echte Description vorhanden ist — die Filter unten schränken das genauer ein. Resumierbar: eine Unterbrechung (Worker-Neustart, Redeploy) macht genau dort weiter, wo aufgehört wurde, statt neu zu starten oder bereits importierte Cubes erneut herunterzuladen. Die echte Gesamtzahl ist im Voraus bekannt, daher ist der Fortschritt ein echter Prozentwert.",
       "start": "Vollständigen Import starten",
       "resume": "Import fortsetzen",
       "status": {
@@ -388,7 +388,14 @@
       "skipped": "Bereits importiert",
       "etaLabel": "noch ~{{time}}",
       "lastProgress": "Letzter Fortschritt: vor {{time}}",
-      "stuckWarning": "Seit {{time}} kein Fortschritt — könnte feststecken (Worker prüfen)."
+      "stuckWarning": "Seit {{time}} kein Fortschritt — könnte feststecken (Worker prüfen).",
+      "topN": "Popularitäts-Rang (Top N)",
+      "maxTotal": "Max. Anzahl Cubes",
+      "maxTotalAny": "unbegrenzt",
+      "requireDescription": "Nur Cubes mit echter Beschreibung",
+      "topNHint": "Ein Cube qualifiziert sich, wenn er in den Top N nach Likes, Decks oder Followern liegt, ≥5 Follower hat, oder eine Beschreibung hat.",
+      "topNHintDisabled": "Deaktiviert, da „Nur Cubes mit echter Beschreibung” aktiv ist — dann zählt ausschließlich die Beschreibung, nicht die Popularität.",
+      "activeFilters": "Aktueller Lauf: ≥{{minCards}} Karten, ≤{{maxCards}} Karten, Top {{topN}}, Beschreibung: {{description}}, max. {{maxTotal}} Cubes."
     }
   },
   "pricesPage": {

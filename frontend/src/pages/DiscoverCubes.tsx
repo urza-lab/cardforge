@@ -5,6 +5,7 @@ import { apiGet, apiPostJson, ApiError } from "../api/client";
 import type {
   CubeDiscoverySyncStatusRead,
   CubeFullImportStatusRead,
+  CubeFullImportTriggerRequest,
   CubeFullScrapeStatusRead,
   PopularCube,
 } from "../types/cubecobra";
@@ -138,6 +139,15 @@ export default function DiscoverCubes() {
   const [fullImportStatus, setFullImportStatus] = useState<CubeFullImportStatusRead | null>(null);
   const [fullImportError, setFullImportError] = useState<string | null>(null);
   const [fullImportStarting, setFullImportStarting] = useState(false);
+  // User-requested scope filters (2026-08-21, after the previous default-
+  // scope run imported 82,309 of 90,932 candidates - see CLAUDE.md): sent
+  // as the trigger request body, and re-editable any time before the next
+  // trigger/resume click - see handleStartFullImport.
+  const [fullImportMinCardCount, setFullImportMinCardCount] = useState("180");
+  const [fullImportMaxCardCount, setFullImportMaxCardCount] = useState("");
+  const [fullImportRequireDescription, setFullImportRequireDescription] = useState(false);
+  const [fullImportTopN, setFullImportTopN] = useState("1000");
+  const [fullImportMaxTotal, setFullImportMaxTotal] = useState("");
 
   const fetchFullImportStatus = () => {
     apiGet<CubeFullImportStatusRead>("/cube-discover/cubes/full-import/status")
@@ -171,7 +181,14 @@ export default function DiscoverCubes() {
     setFullImportStarting(true);
     setFullImportError(null);
     try {
-      const resp = await apiPostJson<CubeFullImportStatusRead>("/cube-discover/cubes/full-import", {});
+      const body: CubeFullImportTriggerRequest = {
+        min_card_count: fullImportMinCardCount === "" ? 180 : Number(fullImportMinCardCount),
+        max_card_count: fullImportMaxCardCount === "" ? null : Number(fullImportMaxCardCount),
+        require_description: fullImportRequireDescription,
+        top_n: fullImportTopN === "" ? 10000 : Number(fullImportTopN),
+        max_total: fullImportMaxTotal === "" ? null : Number(fullImportMaxTotal),
+      };
+      const resp = await apiPostJson<CubeFullImportStatusRead>("/cube-discover/cubes/full-import", body);
       setFullImportStatus(resp);
     } catch (err) {
       setFullImportError(err instanceof ApiError ? err.message : String(err));
@@ -550,8 +567,91 @@ export default function DiscoverCubes() {
                     })}
               </p>
             )}
+            {fullImportStatus.status !== "INACTIVE" && (
+              <p style={{ fontSize: 12, color: "var(--cf-muted)" }}>
+                {t("discoverCubesPage.fullImport.activeFilters", {
+                  minCards: fullImportStatus.filter_min_card_count,
+                  maxCards: fullImportStatus.filter_max_card_count ?? "∞",
+                  topN: fullImportStatus.filter_top_n,
+                  description: fullImportStatus.filter_require_description
+                    ? t("discoverCubesPage.hasDescriptionYes")
+                    : t("discoverCubesPage.hasDescriptionAny"),
+                  maxTotal: fullImportStatus.filter_max_total ?? "∞",
+                })}
+              </p>
+            )}
           </>
         )}
+        <div className="cf-form-row" style={{ flexDirection: "row", alignItems: "flex-end", gap: 10, flexWrap: "wrap" }}>
+          <div>
+            <label htmlFor="fi-min-cards">{t("discoverCubesPage.minCardCount")}</label>
+            <input
+              id="fi-min-cards"
+              className="cf-input"
+              style={{ width: 90 }}
+              type="number"
+              min={0}
+              disabled={fullImportStatus?.status === "RUNNING"}
+              value={fullImportMinCardCount}
+              onChange={(e) => setFullImportMinCardCount(e.target.value)}
+            />
+          </div>
+          <div>
+            <label htmlFor="fi-max-cards">{t("discoverCubesPage.maxCardCount")}</label>
+            <input
+              id="fi-max-cards"
+              className="cf-input"
+              style={{ width: 90 }}
+              type="number"
+              min={0}
+              disabled={fullImportStatus?.status === "RUNNING"}
+              value={fullImportMaxCardCount}
+              onChange={(e) => setFullImportMaxCardCount(e.target.value)}
+              placeholder={t("discoverCubesPage.cardCountAny")}
+            />
+          </div>
+          <div>
+            <label htmlFor="fi-top-n">{t("discoverCubesPage.fullImport.topN")}</label>
+            <input
+              id="fi-top-n"
+              className="cf-input"
+              style={{ width: 90 }}
+              type="number"
+              min={0}
+              disabled={fullImportStatus?.status === "RUNNING" || fullImportRequireDescription}
+              value={fullImportTopN}
+              onChange={(e) => setFullImportTopN(e.target.value)}
+            />
+          </div>
+          <div>
+            <label htmlFor="fi-max-total">{t("discoverCubesPage.fullImport.maxTotal")}</label>
+            <input
+              id="fi-max-total"
+              className="cf-input"
+              style={{ width: 90 }}
+              type="number"
+              min={1}
+              disabled={fullImportStatus?.status === "RUNNING"}
+              value={fullImportMaxTotal}
+              onChange={(e) => setFullImportMaxTotal(e.target.value)}
+              placeholder={t("discoverCubesPage.fullImport.maxTotalAny")}
+            />
+          </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, paddingBottom: 8 }}>
+            <input
+              type="checkbox"
+              disabled={fullImportStatus?.status === "RUNNING"}
+              checked={fullImportRequireDescription}
+              onChange={(e) => setFullImportRequireDescription(e.target.checked)}
+            />
+            {t("discoverCubesPage.fullImport.requireDescription")}
+          </label>
+        </div>
+        <p style={{ fontSize: 12, color: "var(--cf-muted)" }}>
+          {fullImportRequireDescription
+            ? t("discoverCubesPage.fullImport.topNHintDisabled")
+            : t("discoverCubesPage.fullImport.topNHint")}
+        </p>
         <div className="cf-btn-row">
           <button
             className="cf-btn cf-btn-primary"

@@ -195,3 +195,21 @@ class CubeFullImportState(Base):
     skipped_count: Mapped[int] = mapped_column(default=0)  # already imported before this job reached them
     last_cube_id: Mapped[int | None] = mapped_column()
     error_message: Mapped[str | None] = mapped_column(String(1024))
+
+    # User-requested filters (2026-08-21, after the earlier default-scope
+    # run imported 82,309 of 90,932 candidates - see CLAUDE.md): stored on
+    # the state row, not passed as job args, so a resumed/retriggered run
+    # keeps using the same scope the user chose at the last trigger call
+    # (app.services.cube_discover_service.trigger_full_import writes these
+    # on every trigger, run_full_cube_import reads them back instead of the
+    # module-level defaults). `filter_max_total` is a plain safety ceiling
+    # on how many candidates this logical job will ever process - not a
+    # strict "N most popular" ranking (candidates are still walked in the
+    # same stable `id ASC` order as always, for resumability), so it's
+    # described honestly as that in the UI rather than implying an exact
+    # popularity-sorted top-N.
+    filter_min_card_count: Mapped[int] = mapped_column(default=180)
+    filter_max_card_count: Mapped[int | None] = mapped_column()
+    filter_require_description: Mapped[bool] = mapped_column(default=False)
+    filter_top_n: Mapped[int] = mapped_column(default=10_000)
+    filter_max_total: Mapped[int | None] = mapped_column()

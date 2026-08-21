@@ -32,6 +32,19 @@ export interface CubeFullImportStatusRead {
   failed_count: number;
   skipped_count: number;
   error_message: string | null;
+  filter_min_card_count: number;
+  filter_max_card_count: number | null;
+  filter_require_description: boolean;
+  filter_top_n: number;
+  filter_max_total: number | null;
+}
+
+export interface CubeFullImportTriggerRequest {
+  min_card_count: number;
+  max_card_count: number | null;
+  require_description: boolean;
+  top_n: number;
+  max_total: number | null;
 }
 
 export interface PopularCube {

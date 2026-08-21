@@ -539,8 +539,8 @@ def _seed_full_import_cube(db, **overrides: object) -> PopularCube:
 def test_full_import_candidates_excludes_small_cubes():
     db = get_sessionmaker()()
     try:
-        _seed_full_import_cube(db, external_id="small", card_count=39, like_count=99999)
-        big = _seed_full_import_cube(db, external_id="big", card_count=40, like_count=99999)
+        _seed_full_import_cube(db, external_id="small", card_count=179, like_count=99999)
+        big = _seed_full_import_cube(db, external_id="big", card_count=180, like_count=99999)
 
         ids = list(db.scalars(cube_discover_service._full_import_candidates_select()))
         assert ids == [big.id]
@@ -591,6 +591,75 @@ def test_full_import_candidates_includes_cubes_with_enough_followers_without_des
 
         ids = list(db.scalars(cube_discover_service._full_import_candidates_select(top_n=0)))
         assert ids == [followed.id]  # 5 is the real, user-chosen floor - 4 doesn't qualify
+    finally:
+        db.close()
+
+
+def test_full_import_candidates_respects_max_card_count():
+    db = get_sessionmaker()()
+    try:
+        in_range = _seed_full_import_cube(db, external_id="in-range", card_count=400, description="real")
+        _seed_full_import_cube(db, external_id="too-big", card_count=900, description="real")
+
+        ids = list(db.scalars(cube_discover_service._full_import_candidates_select(max_card_count=500)))
+        assert ids == [in_range.id]
+    finally:
+        db.close()
+
+
+def test_full_import_candidates_require_description_excludes_popular_without_one():
+    """require_description=True is meant to *narrow* scope, not just be one
+    more way to qualify - a very popular cube with no description must NOT
+    sneak in via the top_n/follower checks once this is set.
+    """
+    db = get_sessionmaker()()
+    try:
+        described = _seed_full_import_cube(
+            db, external_id="described", like_count=0, num_decks=0, description="A real cube."
+        )
+        _seed_full_import_cube(
+            db, external_id="popular-no-description", like_count=99999, num_decks=99999, owner_follower_count=99999
+        )
+
+        ids = list(db.scalars(cube_discover_service._full_import_candidates_select(require_description=True)))
+        assert ids == [described.id]
+    finally:
+        db.close()
+
+
+def test_trigger_full_import_accepts_custom_filters_and_caps_total_candidates():
+    db = get_sessionmaker()()
+    try:
+        _seed_full_import_cube(db, external_id="a", card_count=300, description="real")
+        _seed_full_import_cube(db, external_id="b", card_count=300, description="real")
+        _seed_full_import_cube(db, external_id="c", card_count=300, description="real")
+
+        state = cube_discover_service.trigger_full_import(db, max_total=2)
+
+        assert state.total_candidates == 2  # 3 real matches, but capped by max_total
+        assert state.filter_max_total == 2
+        assert state.filter_min_card_count == 180
+    finally:
+        db.close()
+
+
+def test_run_full_cube_import_stops_at_max_total(monkeypatch: pytest.MonkeyPatch):
+    db = get_sessionmaker()()
+    try:
+        _seed_full_import_cube(db, external_id="a", name="Cube A", description="real")
+        _seed_full_import_cube(db, external_id="b", name="Cube B", description="real")
+        _seed_full_import_cube(db, external_id="c", name="Cube C", description="real")
+        monkeypatch.setattr(cubecobra, "fetch_and_parse", lambda url, user_agent: _fetch_result([("Sol Ring", 1)]))
+
+        state = cube_discover_service.get_full_import_state(db)
+        state.filter_max_total = 2
+        db.commit()
+
+        state = cube_discover_service.run_full_cube_import(db)
+
+        assert state.status == "COMPLETED"
+        assert state.imported_count == 2  # stopped after 2, "c" never touched
+        assert db.query(CardList).count() == 2
     finally:
         db.close()
 

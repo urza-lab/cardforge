@@ -7,12 +7,18 @@ from app.core.database import get_db
 from app.schemas.cubecobra import (
     CubeDiscoverySyncStatusRead,
     CubeFullImportStatusRead,
+    CubeFullImportTriggerRequest,
     CubeFullScrapeStatusRead,
     PopularCubeRead,
 )
 from app.services import cube_discover_service
 
 router = APIRouter(prefix="/api/cube-discover", tags=["cube-discover"])
+
+# A module-level singleton, not a fresh call in the endpoint's own default
+# (ruff B008) - immutable in practice (this endpoint only ever reads its
+# fields), so sharing one instance across requests is safe.
+_DEFAULT_FULL_IMPORT_TRIGGER = CubeFullImportTriggerRequest()
 
 
 @router.get("/cubes", response_model=list[PopularCubeRead])
@@ -79,15 +85,28 @@ def get_full_import_status(db: Session = Depends(get_db)) -> CubeFullImportStatu
 
 
 @router.post("/cubes/full-import", response_model=CubeFullImportStatusRead, status_code=202)
-def trigger_full_import(db: Session = Depends(get_db)) -> CubeFullImportStatusRead:
+def trigger_full_import(
+    body: CubeFullImportTriggerRequest = _DEFAULT_FULL_IMPORT_TRIGGER,
+    db: Session = Depends(get_db),
+) -> CubeFullImportStatusRead:
     """User-requested: a real, resumable bulk *import* (download + create a
     CardList) over a filtered subset of the cached cube pool - see
     cube_discover_service.run_full_cube_import for the candidate rule and
     why this is safe to call again after an interruption (resumes from
-    `last_cube_id` instead of restarting or re-downloading).
+    `last_cube_id` instead of restarting or re-downloading). `body`'s
+    filters (user-requested, 2026-08-21) are stored on the state row for
+    this call and every resume afterward - see trigger_full_import's own
+    docstring.
     """
     try:
-        state = cube_discover_service.trigger_full_import(db)
+        state = cube_discover_service.trigger_full_import(
+            db,
+            min_card_count=body.min_card_count,
+            max_card_count=body.max_card_count,
+            require_description=body.require_description,
+            top_n=body.top_n,
+            max_total=body.max_total,
+        )
     except cube_discover_service.SyncAlreadyInProgressError as exc:
         raise HTTPException(status_code=409, detail="a full cube import is already in progress") from exc
     return CubeFullImportStatusRead.model_validate(state)
